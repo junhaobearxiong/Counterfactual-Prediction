@@ -20,9 +20,11 @@ class EM:
         self.J = J # number of past treatment effects to be considered
         
         self.train_pct = train_pct # percentage of each time series used for training
-        # time of last observations for each patients
+        # time of last observations for each patients plus one
+        # plus one because last_obs and last_train_obs effectively take the role of T in the most basic version
+        # T represents the position right after the end of 'valid' values in an array 
         self.last_obs = self.find_last_obs()
-        # time of last observation for traing 
+        # time of last observation for training plus one 
         self.last_train_obs = self.find_last_train_obs()
         
         # Other model parameters
@@ -31,13 +33,13 @@ class EM:
         self.Q = np.zeros((self.num_patients, self.T, self.K)) # interaction term
         
         # Model Parameters to be estimated
-        self.A = np.random.randn(self.J, self.N)*0.01 # coefficients a_j's
-        self.b = np.random.randn(self.M)*0.01
+        self.A = np.full((self.J, self.N), -.1) + np.random.randn(self.J, self.N)*0.01 # coefficients a_j's
+        self.b = np.full(self.M, .1) + np.random.randn(self.M)*0.01
         self.d = np.zeros(self.K)
         self.sigma_1 = .05
         self.sigma_2 = .005
         self.sigma_0 = .05 # initial state variance
-        self.init_z = np.random.normal(6, self.sigma_0, size = 1)# np.random.uniform(0, 10, size = 1) # initial state mean
+        self.init_z = np.random.normal(0, np.sqrt(self.sigma_0), size = 1)# np.random.uniform(0, 10, size = 1) # initial state mean
         
         # create coefficient matrix
         mtx = []
@@ -206,14 +208,9 @@ class EM:
         self.sigma_1_mle()
         self.pi_mle()
         self.sigma_2_mle()
-    
-    def set_params(self):
-        self.sigma_1 = model.noise_1
-        self.sigma_2 = model.noise_2
         
     '''Run EM for fixed iterations or until convergence'''
     def run_EM(self, max_num_iter, tol=.0001):
-        #self.set_params()
         for i in range(max_num_iter):
             prev = self.params
             prev_sigma_1 = self.sigma_1
@@ -262,7 +259,7 @@ class EM:
     def plot(self, n, true_model):
         times = list(range(self.last_obs[n]))
         fig = plt.figure()
-        if self.train_pct < 1:
+        if self.train_pct < 1 and self.last_train_obs[n] < self.last_obs[n]:
             z, y = self.predict(n)
             upper = np.zeros(self.last_obs[n])
             lower = np.zeros(self.last_obs[n])
@@ -275,10 +272,11 @@ class EM:
             plt.plot(times, model.z[n, 0:self.last_obs[n]], label = 'actual state values')
         plt.plot(times, self.y[n, 0:self.last_obs[n]], '.', label = 'actual observed values') 
         plt.axvline(x=self.last_train_obs[n]-1, color='m', linestyle='--')
+        colors = ['r', 'y', 'g', 'c']
         for treatment in range(self.N):
             for t in np.nonzero(self.X[n, :, treatment])[0]:
-                plt.axvline(x=t, color='k', linestyle=':')
-        plt.xlabel('time (hr)')
+                plt.axvline(x=t, linestyle=':', color=colors[treatment])
+        plt.xlabel('time')
         plt.ylabel('INR')
         plt.title('Kalman Filter Results')
         plt.legend()
