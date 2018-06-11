@@ -33,8 +33,8 @@ class EM:
         self.Q = np.zeros((self.num_patients, self.T, self.K)) # interaction term
         
         # Model Parameters to be estimated
-        self.A = np.full((self.J, self.N), -.1) + np.random.randn(self.J, self.N)*0.01 # coefficients a_j's
-        self.b = np.full(self.M, .1) + np.random.randn(self.M)*0.01
+        self.A = np.random.randn(self.J, self.N)*0.01 #np.full((self.J, self.N), -.1) + np.random.randn(self.J, self.N)*0.01 # coefficients a_j's
+        self.b = np.random.randn(self.M)*0.01 #np.full(self.M, .1) + np.random.randn(self.M)*0.01
         self.d = np.zeros(self.K)
         self.sigma_1 = .05
         self.sigma_2 = .005
@@ -255,9 +255,10 @@ class EM:
             z[t] = self.transition(z[t-1], n, t)
             y[t] = self.emission(z[t], n, t)
         return z, y
-        
+    '''    
     def plot(self, n, true_model):
-        times = list(range(self.last_obs[n]))
+        print('Patient {}'.format(n))
+        times = [t * for t in range(self.last_obs[n])]
         fig = plt.figure()
         if self.train_pct < 1 and self.last_train_obs[n] < self.last_obs[n]:
             z, y = self.predict(n)
@@ -266,15 +267,18 @@ class EM:
             upper[self.last_train_obs[n]:] = np.sqrt(self.sigma_filter[n, self.last_train_obs[n]:self.last_obs[n]] + self.sigma_2)
             lower[self.last_train_obs[n]:] = -np.sqrt(self.sigma_filter[n, self.last_train_obs[n]:self.last_obs[n]] + self.sigma_2)
             plt.fill_between(times, y+upper, y+lower, color='.8')
-            plt.plot(times, z, label = 'predicted state values')
-            plt.plot(times, y, label = 'predicted observed values')
+            #plt.plot(times, z, label = 'predicted state values')
+            plt.plot(times, y, label = 'predicted observed values', color='g', linestyle='--')
         if true_model:
             plt.plot(times, model.z[n, 0:self.last_obs[n]], label = 'actual state values')
-        plt.plot(times, self.y[n, 0:self.last_obs[n]], '.', label = 'actual observed values') 
-        plt.axvline(x=self.last_train_obs[n]-1, color='m', linestyle='--')
-        colors = ['r', 'y', 'g', 'c']
+        plt.plot(times[0:self.last_train_obs[n]], self.y[n, 0:self.last_train_obs[n]], '.', label = 'actual observed values (for training)', color='b')
+        plt.plot(times[self.last_train_obs[n]:self.last_obs[n]], self.y[n, self.last_train_obs[n]:self.last_obs[n]], '.', label = 'actual observed values (for testing)', color='r')
+        #plt.axvline(x=self.last_train_obs[n]-1, color='m', linestyle='--')
+        colors = ['r', 'y', 'm', 'c', 'b']
         for treatment in range(self.N):
             for t in np.nonzero(self.X[n, :, treatment])[0]:
+                if t >= self.last_obs[n]:
+                    break
                 plt.axvline(x=t, linestyle=':', color=colors[treatment])
         plt.xlabel('time')
         plt.ylabel('INR')
@@ -283,3 +287,4 @@ class EM:
         fig.set_figheight(8)
         fig.set_figwidth(15)
         plt.show()
+    '''
