@@ -63,8 +63,12 @@ def binning_X(data, bins):
             x_binned = np.zeros(len(bins)-1)
             binned_index = np.digitize(d[name + '_times'], bins)
             for j in range(1, x_binned.shape[0]):
-                count = np.where(binned_index==j)[0].shape[0]
-                x_binned[j-1] = count
+                count = np.where(binned_index==j)[0].shape[0]   
+                #x_binned[j-1] = count
+                if count == 0:
+                    x_binned[j-1] = 0
+                else:
+                    x_binned[j-1] = 1
             X_mtx[i, :, k] = x_binned
     return X_mtx
 

@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import pickle
 
 class EM:
-    def __init__(self, y, X, c, J, K, train_pct):
+    def __init__(self, y, X, c, J, K, train_pct, single_effect=False):
         # Store inputs
         self.num_patients = np.shape(y)[0] 
         self.T = np.shape(y)[1] # length of the observed sequence
@@ -18,7 +18,8 @@ class EM:
         self.c = c # chronic conditions
         self.K = K  # number of interaction terms modeled
         self.J = J # number of past treatment effects to be considered
-        
+        self.single_effect = single_effect # if true only consider the Jth treatment prior to the current time point
+
         self.train_pct = train_pct # percentage of each time series used for training
         # time of last observations for each patients plus one
         # plus one because last_obs and last_train_obs effectively take the role of T in the most basic version
@@ -33,31 +34,42 @@ class EM:
         self.Q = np.zeros((self.num_patients, self.T, self.K)) # interaction term
         
         # Model Parameters to be estimated
-        self.A = np.random.randn(self.J, self.N)*0.01 #np.full((self.J, self.N), -.1) + np.random.randn(self.J, self.N)*0.01 # coefficients a_j's
+        if self.single_effect:
+            self.A = np.full(self.N, .1) + np.random.randn(self.N)*0.01
+        else:
+            self.A = np.full((self.J, self.N), .1) + np.random.randn(self.J, self.N)*0.01 # coefficients a_j's
         self.b = np.random.randn(self.M)*0.01 #np.full(self.M, .1) + np.random.randn(self.M)*0.01
         self.d = np.zeros(self.K)
         self.sigma_1 = .05
         self.sigma_2 = .005
         self.sigma_0 = .05 # initial state variance
-        self.init_z = np.random.normal(0, np.sqrt(self.sigma_0), size = 1)# np.random.uniform(0, 10, size = 1) # initial state mean
+        self.init_z = np.random.normal(1, np.sqrt(self.sigma_0), size = 1)# np.random.uniform(0, 10, size = 1) # initial state mean
         
         # create coefficient matrix
         mtx = []
         for n in range(self.num_patients):
             columns = []
-            for j in range(1, self.J+1):
-                col = np.roll(self.X[n, :, :], shift=j, axis=0)
-                col[[i for i in range(0, j)], :] = 0
+            if self.single_effect:
+                self.params = np.zeros(self.N + self.M + self.K)
+                col = np.roll(self.X[n, :, :], shift=self.J, axis=0)
+                col[[i for i in range(0, self.J)], :] = 0
                 columns.append(col)
+            else:
+                self.params = np.zeros(self.N*self.J + self.M + self.K)
+                for j in range(1, self.J+1):
+                    col = np.roll(self.X[n, :, :], shift=j, axis=0)
+                    col[[i for i in range(0, j)], :] = 0
+                    columns.append(col)
             C = np.stack([self.c[n, :] for i in range(self.T)], axis = 0)
             columns.append(C)
             coeff_mtx = np.concatenate(columns, axis = 1)
+            # get rid of nans
             coeff_mtx = coeff_mtx[:self.last_train_obs[n], :]
             nans = np.where(np.isnan(self.y[n, :self.last_train_obs[n]]))[0]
             coeff_mtx = np.delete(coeff_mtx, nans, axis = 0)
             mtx.append(coeff_mtx)
         self.coeff_mtx = np.concatenate(mtx, axis = 0)
-        self.params = np.zeros(self.N*self.J + self.M + self.K)
+        
         
         # Intermediate values to stored
         self.mu_filter = np.zeros((self.num_patients, self.T)) # mu_t|t
@@ -88,9 +100,12 @@ class EM:
     # compute the added effect, denoted pi_t, at time t given the current parameter values 
     def added_effect(self, n, t):
         treatment_effect = 0
-        for j in range(self.J):
-            if t-1 >= j:
-                treatment_effect = treatment_effect + np.dot(self.A[j, :], self.X[n, t-1-j, :])
+        if self.single_effect:
+            treatment_effect = np.dot(self.A, self.X[n, t-self.J, :])
+        else:
+            for j in range(self.J):
+                if t-1 >= j:
+                    treatment_effect = treatment_effect + np.dot(self.A[j, :], self.X[n, t-1-j, :])
         pi = treatment_effect + np.dot(self.b, self.c[n, :]) # total added effect
         return pi
     
@@ -130,7 +145,7 @@ class EM:
             self.mu_square_smooth[n, self.last_train_obs[n]-1] = self.sigma_smooth[n, self.last_train_obs[n]-1] + \
                 np.square(self.mu_smooth[n, self.last_train_obs[n]-1])
             for t in range(self.last_train_obs[n]-2, -1, -1):
-                self.ksmoother(n, t)   
+                self.ksmoother(n, t)
     
     # backward recursion to compute sigma^2_{t, t-1}|T, which is necessary to compute mu_ahead_smooth
     def backward_sigma_ahead(self):
@@ -161,15 +176,16 @@ class EM:
         self.sigma_0 = result
         
     def sigma_1_mle(self):
+        result = 0
         for n in range(self.num_patients):
-            result = 0
+            sum_result = 0
             if self.last_train_obs[n] > 1:
                 for t in range(self.last_train_obs[n]-1):
-                    result += self.mu_square_smooth[n, t+1]-2*self.mu_ahead_smooth[n, t]+self.mu_square_smooth[n, t]
-                result /= (self.last_train_obs[n]-1)
-                self.sigma_1 += result
-        self.sigma_1 /= self.num_patients
-    
+                    sum_result += self.mu_square_smooth[n, t+1]-2*self.mu_ahead_smooth[n, t]+self.mu_square_smooth[n, t]
+                result = sum_result / (self.last_train_obs[n]-1) 
+        result /= self.num_patients
+        self.sigma_1 = result
+
     def init_z_mle(self):
         result = 0
         for n in range(self.num_patients):
@@ -184,23 +200,29 @@ class EM:
             rhs = np.delete(rhs, np.where(np.isnan(rhs))[0])
             rhs_list.append(rhs)
         rhs_concat = np.concatenate(rhs_list, axis = 0)
-        params = sp.linalg.lstsq(self.coeff_mtx, rhs_concat)[0] # params as a long vector
-        self.A = np.reshape(params[0:self.N*self.J], (self.J, self.N))
-        self.b = np.array(params[self.N*self.J:self.N*self.J+self.M])
-        self.d = np.array(params[self.N*self.J+self.M:])
+        params = np.linalg.lstsq(self.coeff_mtx, rhs_concat, rcond=None)[0] # params as a long vector
+        if self.single_effect:
+            self.A = np.array(params[0:self.N])
+            self.b = np.array(params[self.N:self.N+self.M])
+        else:
+            self.A = np.reshape(params[0:self.N*self.J], (self.J, self.N))
+            self.b = np.array(params[self.N*self.J:self.N*self.J+self.M])
+            self.d = np.array(params[self.N*self.J+self.M:])
         self.params = params 
     
     def sigma_2_mle(self):
+        result = 0
         for n in range(self.num_patients):
-            result = 0
+            sum_result = 0
             num_sum = 0
             for t in range(self.last_train_obs[n]):
                 if not np.isnan(self.y[n, t]):
-                    result += np.square(self.y[n, t]-self.added_effect(n, t))-2*(self.y[n, t]-self.added_effect(n, t)) \
+                    sum_result += np.square(self.y[n, t]-self.added_effect(n, t))-2*(self.y[n, t]-self.added_effect(n, t)) \
                         *self.mu_smooth[n, t] + self.mu_square_smooth[n, t]
                     num_sum += 1
-            self.sigma_2 += result / num_sum
-        self.sigma_2 /= self.num_patients
+            result += sum_result / num_sum
+        result /= self.num_patients
+        self.sigma_2 = result
         
     def M_step(self):
         self.init_z_mle()
@@ -235,11 +257,7 @@ class EM:
 
     def emission(self, z, n, t):
         treatment_effect = 0
-        for j in range(np.shape(self.A)[0]):
-            if t-1 >= j:
-                treatment_effect += np.dot(self.A[j, :], self.X[n, t-1-j, :])
-        pi = treatment_effect + np.dot(self.b, self.c[n, :]) # total added effect
-        mean = z + pi
+        mean = z + self.added_effect(n, t)
         y = mean #np.random.normal(mean, np.sqrt(self.sigma_2), 1)
         return y
     
@@ -255,36 +273,13 @@ class EM:
             z[t] = self.transition(z[t-1], n, t)
             y[t] = self.emission(z[t], n, t)
         return z, y
-    '''    
-    def plot(self, n, true_model):
-        print('Patient {}'.format(n))
-        times = [t * for t in range(self.last_obs[n])]
-        fig = plt.figure()
-        if self.train_pct < 1 and self.last_train_obs[n] < self.last_obs[n]:
-            z, y = self.predict(n)
-            upper = np.zeros(self.last_obs[n])
-            lower = np.zeros(self.last_obs[n])
-            upper[self.last_train_obs[n]:] = np.sqrt(self.sigma_filter[n, self.last_train_obs[n]:self.last_obs[n]] + self.sigma_2)
-            lower[self.last_train_obs[n]:] = -np.sqrt(self.sigma_filter[n, self.last_train_obs[n]:self.last_obs[n]] + self.sigma_2)
-            plt.fill_between(times, y+upper, y+lower, color='.8')
-            #plt.plot(times, z, label = 'predicted state values')
-            plt.plot(times, y, label = 'predicted observed values', color='g', linestyle='--')
-        if true_model:
-            plt.plot(times, model.z[n, 0:self.last_obs[n]], label = 'actual state values')
-        plt.plot(times[0:self.last_train_obs[n]], self.y[n, 0:self.last_train_obs[n]], '.', label = 'actual observed values (for training)', color='b')
-        plt.plot(times[self.last_train_obs[n]:self.last_obs[n]], self.y[n, self.last_train_obs[n]:self.last_obs[n]], '.', label = 'actual observed values (for testing)', color='r')
-        #plt.axvline(x=self.last_train_obs[n]-1, color='m', linestyle='--')
-        colors = ['r', 'y', 'm', 'c', 'b']
-        for treatment in range(self.N):
-            for t in np.nonzero(self.X[n, :, treatment])[0]:
-                if t >= self.last_obs[n]:
-                    break
-                plt.axvline(x=t, linestyle=':', color=colors[treatment])
-        plt.xlabel('time')
-        plt.ylabel('INR')
-        plt.title('Kalman Filter Results')
-        plt.legend()
-        fig.set_figheight(8)
-        fig.set_figwidth(15)
-        plt.show()
-    '''
+
+    def get_MSE(self):
+        sum_of_square = 0
+        for n in range(self.num_patients):
+            y_true = self.y[n, self.last_train_obs[n]:self.last_obs[n]]
+            y_pred = self.predict(n)[1][self.last_train_obs[n]:self.last_obs[n]]
+            y_true = y_true[np.where(np.invert(np.isnan(y_true)))[0]]
+            y_pred = y_pred[np.where(np.invert(np.isnan(y_true)))[0]]
+            sum_of_square += np.sum(np.square(np.subtract(y_pred, y_true))) / y_pred.shape[0]
+        return sum_of_square / self.num_patients
