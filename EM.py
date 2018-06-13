@@ -43,7 +43,7 @@ class EM:
         self.sigma_1 = .05
         self.sigma_2 = .005
         self.sigma_0 = .05 # initial state variance
-        self.init_z = np.random.normal(1, np.sqrt(self.sigma_0), size = 1)# np.random.uniform(0, 10, size = 1) # initial state mean
+        self.init_z = np.random.normal(0, np.sqrt(self.sigma_0), size = 1)# np.random.uniform(0, 10, size = 1) # initial state mean
         
         # create coefficient matrix
         mtx = []
@@ -68,8 +68,7 @@ class EM:
             nans = np.where(np.isnan(self.y[n, :self.last_train_obs[n]]))[0]
             coeff_mtx = np.delete(coeff_mtx, nans, axis = 0)
             mtx.append(coeff_mtx)
-        self.coeff_mtx = np.concatenate(mtx, axis = 0)
-        
+        self.coeff_mtx = np.concatenate(mtx, axis = 0)        
         
         # Intermediate values to stored
         self.mu_filter = np.zeros((self.num_patients, self.T)) # mu_t|t
@@ -182,7 +181,7 @@ class EM:
             if self.last_train_obs[n] > 1:
                 for t in range(self.last_train_obs[n]-1):
                     sum_result += self.mu_square_smooth[n, t+1]-2*self.mu_ahead_smooth[n, t]+self.mu_square_smooth[n, t]
-                result = sum_result / (self.last_train_obs[n]-1) 
+                result += sum_result / (self.last_train_obs[n]-1) 
         result /= self.num_patients
         self.sigma_1 = result
 
@@ -241,12 +240,26 @@ class EM:
             prev_sigma_0 = self.sigma_0
             self.E_step()
             self.M_step()
+            #print('sigma 1 {}'.format(self.sigma_1))
+            #print('iteration {}'.format(i))
+            '''
+            print('mu ahead smooth {}'.format(self.mu_ahead_smooth))
+            print('mu square smooth {}'.format(self.mu_square_smooth))
+            print('observed {}'.format(self.y[0, :self.last_train_obs[0]]))
+            print('mu filter {}'.format(self.mu_filter[0, :self.last_train_obs[0]]))
+            print('mu smooth {}'.format(self.mu_smooth[0, :self.last_train_obs[0]]))
+            '''
             #print('iterations {} completed: '.format(i))
+            #mse.append(self.get_MSE())
+            #print('mse in iteration {} is {}'.format(i, self.get_MSE()))
             diff = np.absolute(np.subtract(prev, self.params))
             if np.all(diff < tol) and abs(self.sigma_1 - prev_sigma_1) < tol and abs(self.sigma_2 - prev_sigma_2) < tol \
                 and abs(self.init_z - prev_init_z) < tol and abs(self.sigma_0 - prev_sigma_0) < tol:
                 print('{} iterations before convergence'.format(i+1))
                 return
+        #mse = np.array(mse)
+        #print('min mse {} is in iteration {}'.format(np.amin(mse), np.argmin(mse)))
+        #return np.argmin(mse)
         print('max iterations: {} reached'.format(max_num_iter))
     
     def transition(self, prev, n, t):
@@ -256,7 +269,6 @@ class EM:
         return z
 
     def emission(self, z, n, t):
-        treatment_effect = 0
         mean = z + self.added_effect(n, t)
         y = mean #np.random.normal(mean, np.sqrt(self.sigma_2), 1)
         return y
@@ -276,10 +288,16 @@ class EM:
 
     def get_MSE(self):
         sum_of_square = 0
+        count = 0
         for n in range(self.num_patients):
-            y_true = self.y[n, self.last_train_obs[n]:self.last_obs[n]]
-            y_pred = self.predict(n)[1][self.last_train_obs[n]:self.last_obs[n]]
-            y_true = y_true[np.where(np.invert(np.isnan(y_true)))[0]]
-            y_pred = y_pred[np.where(np.invert(np.isnan(y_true)))[0]]
-            sum_of_square += np.sum(np.square(np.subtract(y_pred, y_true))) / y_pred.shape[0]
-        return sum_of_square / self.num_patients
+            if self.last_train_obs[n] < self.last_obs[n]:
+                y_true = self.y[n, self.last_train_obs[n]:self.last_obs[n]]
+                y_pred = self.predict(n)[1][self.last_train_obs[n]:self.last_obs[n]]
+                y_true = y_true[np.where(np.invert(np.isnan(y_true)))[0]]
+                y_pred = y_pred[np.where(np.invert(np.isnan(y_true)))[0]]
+                sum_of_square += np.sum(np.square(np.subtract(y_pred, y_true))) / y_pred.shape[0]
+                count += 1
+        if count > 0:
+            return sum_of_square / count
+        else:
+            return 0

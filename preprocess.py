@@ -42,8 +42,12 @@ def get_bins(data, bin_size):
 
 # data is the original data, y_times is obs_times after being aligned at the beginning
 # if multiple values are in the same bin, take the average
-def binning_y(data, bins):
-    y_mtx = np.zeros((len(data), len(bins)-1))
+# return missing_list, a list of index of data whose missing_pct is larger than a threshold
+# use to inform binning_X and binning_c which indices not to include
+def binning_y(data, bins, missing_pct):
+    #y_mtx = np.zeros((len(data), len(bins)-1))
+    y_list = []
+    missing_list = []
     for i, d in enumerate(data):
         y_binned = np.full(len(bins)-1, np.nan)
         binned_index = np.digitize(d['obs_times'], bins)
@@ -52,13 +56,23 @@ def binning_y(data, bins):
             if index.shape[0] > 0:
                 values = d['obs_y'][index]
                 y_binned[j-1] = np.mean(values)
-        y_mtx[i, :] = y_binned
-    return y_mtx
+        if get_missing_pct_single(y_binned) < missing_pct:
+            #y_mtx[i, :] = y_binned
+            y_list.append(y_binned)
+        else:
+            missing_list.append(i)
+    y_mtx = np.concatenate(y_list, axis=0)
+    y_mtx = np.reshape(y_mtx, (len(y_list), len(bins)-1))
+    return (y_mtx, missing_list)
 
-def binning_X(data, bins):
-    X_mtx = np.zeros((len(data), len(bins)-1, 5))
+def binning_X(data, bins, missing_list):
+    #X_mtx = np.zeros((len(data), len(bins)-1, 5))
+    X_list = []
     names = ['nsaid', 'transfusion_plasma', 'transfusion_platelet', 'anticoagulant', 'aspirin']
     for i, d in enumerate(data):
+        if i in missing_list:
+            continue
+        X_i_list = []
         for k, name in enumerate(names):
             x_binned = np.zeros(len(bins)-1)
             binned_index = np.digitize(d[name + '_times'], bins)
@@ -69,10 +83,22 @@ def binning_X(data, bins):
                     x_binned[j-1] = 0
                 else:
                     x_binned[j-1] = 1
-            X_mtx[i, :, k] = x_binned
+            #X_mtx[i, :, k] = x_binned
+            X_i_list.append(x_binned)
+        X_i_mtx = np.transpose(np.stack(X_i_list, axis = 0))
+        X_list.append(X_i_mtx)
+    X_mtx = np.stack(X_list, axis=0)
     return X_mtx
 
-def get_missing_pct(y):
+def get_missing_pct_single(y):
+    last_obs = np.where(np.invert(np.isnan(y)))[0][-1] + 1
+    y_cuttail = y[0:last_obs]
+    # the missing percentage of each patient is calculated by dividing the total number of time points between the first
+    # and last observations by the number of nans between the first and last observations 
+    missing_pct = np.where(np.isnan(y_cuttail))[0].shape[0] / y_cuttail.shape[0]
+    return missing_pct * 100
+
+def get_missing_pct_total(y):
     y_cuttail = {}
     last_obs = np.zeros(y.shape[0], dtype=int)
     for i in range(y.shape[0]):
@@ -87,18 +113,25 @@ def get_missing_pct(y):
     missing_pct /= len(y_cuttail)
     return missing_pct * 100
 
-def get_c(data):
-    c_mtx = np.zeros((len(data), 3))
+def get_c(data, missing_list):
+    #c_mtx = np.zeros((len(data), 3))
+    c_list = []
+    c_length = 3
     for i, d in enumerate(data):
+        if i in missing_list:
+            continue
         c = np.concatenate([d['chronic'], d['demographic']], axis=0)
-        c_mtx[i, :] = c
+        #c_mtx[i, :] = c
+        c_list.append(c)
+    c_mtx = np.concatenate(c_list)
+    c_mtx = np.reshape(c_mtx, (len(c_list), c_length))
     return c_mtx
 
-def preprocess(data, cutoff, bin_size):
+def preprocess(data, cutoff, bin_size, missing_pct=30):
     data = cutoff_num_obs(data, cutoff)
     data = align_time_series(data)
     bins = get_bins(data, bin_size)
-    y = binning_y(data, bins)
-    X = binning_X(data, bins)
-    c = get_c(data)
+    y, missing_list = binning_y(data, bins, missing_pct)
+    X = binning_X(data, bins, missing_list)
+    c = get_c(data, missing_list)
     return (y, X, c)
