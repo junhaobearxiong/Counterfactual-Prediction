@@ -3,6 +3,7 @@ import scipy as sp
 import pandas as pd
 import scipy
 import scipy.stats
+from scipy.stats import norm
 import math
 import random
 import matplotlib.pyplot as plt
@@ -80,6 +81,8 @@ class EM:
         self.mu_square_smooth = np.zeros((self.num_patients, self.T)) # E[z_t^2|{y}]
         self.mu_ahead_smooth = np.zeros((self.num_patients, self.T)) # E[z_t * z_{t-1}|{y}]
         self.sigma_ahead_smooth = np.zeros((self.num_patients, self.T))
+
+        self.log_lik = [] # used to debug
     
     # find the last non-nan y value for training for each patient
     # return an array of the length num_patients
@@ -104,7 +107,7 @@ class EM:
         else:
             for j in range(self.J):
                 if t-1 >= j:
-                    treatment_effect = treatment_effect + np.dot(self.A[j, :], self.X[n, t-1-j, :])
+                    treatment_effect += np.dot(self.A[j, :], self.X[n, t-1-j, :])
         pi = treatment_effect + np.dot(self.b, self.c[n, :]) # total added effect
         return pi
     
@@ -150,10 +153,10 @@ class EM:
     def backward_sigma_ahead(self):
         for n in range(self.num_patients):
             initial_time = self.last_train_obs[n]-2
-            self.sigma_ahead_smooth[n, initial_time] = (1 - self.kgain[n, initial_time]) * self.sigma_smooth[n, initial_time]
+            self.sigma_ahead_smooth[n, initial_time] = (1 - self.kgain[n, initial_time+1]) * self.sigma_filter[n, initial_time]
             for t in range(self.last_train_obs[n]-3, -1, -1):
-                self.sigma_ahead_smooth[n, t] = self.sigma_smooth[n, t] * self.jgain[n, t-1] + \
-                    self.jgain[n, t] * (self.sigma_ahead_smooth[n, t+1] - self.sigma_smooth[n, t]) * self.jgain[n, t-1]
+                self.sigma_ahead_smooth[n, t] = self.sigma_filter[n, t+1] * self.jgain[n, t] + \
+                    self.jgain[n, t+1] * (self.sigma_ahead_smooth[n, t+1] - self.sigma_filter[n, t+1]) * self.jgain[n, t]
     
     def calc_mu_ahead_smooth(self):
         for n in range(self.num_patients):
@@ -231,35 +234,29 @@ class EM:
         self.sigma_2_mle()
         
     '''Run EM for fixed iterations or until convergence'''
-    def run_EM(self, max_num_iter, tol=.0001):
+    def run_EM(self, max_num_iter, tol=.01):
+        old_ll = -np.inf
         for i in range(max_num_iter):
-            prev = self.params
-            prev_sigma_1 = self.sigma_1
-            prev_sigma_2 = self.sigma_2
-            prev_init_z = self.init_z
-            prev_sigma_0 = self.sigma_0
             self.E_step()
             self.M_step()
-            #print('sigma 1 {}'.format(self.sigma_1))
-            #print('iteration {}'.format(i))
+            new_ll = self.obs_log_lik()
+            #print('observed log likelihood {}'.format(new_ll))
+            self.log_lik.append(new_ll)
             '''
-            print('mu ahead smooth {}'.format(self.mu_ahead_smooth))
-            print('mu square smooth {}'.format(self.mu_square_smooth))
-            print('observed {}'.format(self.y[0, :self.last_train_obs[0]]))
-            print('mu filter {}'.format(self.mu_filter[0, :self.last_train_obs[0]]))
-            print('mu smooth {}'.format(self.mu_smooth[0, :self.last_train_obs[0]]))
+            if np.abs(new_ll - old_ll) < tol:
+                print('{} iterations before convergence'.format(i+1))
+                return
             '''
-            #print('iterations {} completed: '.format(i))
-            #mse.append(self.get_MSE())
-            #print('mse in iteration {} is {}'.format(i, self.get_MSE()))
+            old_ll = new_ll
+            '''
             diff = np.absolute(np.subtract(prev, self.params))
             if np.all(diff < tol) and abs(self.sigma_1 - prev_sigma_1) < tol and abs(self.sigma_2 - prev_sigma_2) < tol \
                 and abs(self.init_z - prev_init_z) < tol and abs(self.sigma_0 - prev_sigma_0) < tol:
                 print('{} iterations before convergence'.format(i+1))
                 return
-        #mse = np.array(mse)
-        #print('min mse {} is in iteration {}'.format(np.amin(mse), np.argmin(mse)))
-        #return np.argmin(mse)
+            '''
+            #print('iteration {}'.format(i))
+            #print('mse {}'.format(self.get_MSE()))
         print('max iterations: {} reached'.format(max_num_iter))
     
     def transition(self, prev, n, t):
@@ -286,6 +283,7 @@ class EM:
             y[t] = self.emission(z[t], n, t)
         return z, y
 
+    # get prediction mean square error 
     def get_MSE(self):
         sum_of_square = 0
         count = 0
@@ -301,3 +299,15 @@ class EM:
             return sum_of_square / count
         else:
             return 0
+
+    # calculate the observed data (training) log likelihood 
+    def obs_log_lik(self):
+        log_lik = 0
+        for n in range(self.num_patients):
+            for t in range(self.last_train_obs[n]):
+                if np.isnan(self.y[n, t]):
+                    continue
+                mean = self.mu_smooth[n, t] + self.added_effect(n, t)
+                std = np.sqrt(self.sigma_2)
+                log_lik += norm.logpdf(self.y[n, t], mean, std)
+        return log_lik
