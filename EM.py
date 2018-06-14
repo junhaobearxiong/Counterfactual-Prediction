@@ -4,6 +4,7 @@ import pandas as pd
 import scipy
 import scipy.stats
 from scipy.stats import norm
+from scipy import integrate
 import math
 import random
 import matplotlib.pyplot as plt
@@ -118,10 +119,10 @@ class EM:
             self.mu_filter[n, t+1] = self.mu_filter[n, t]
             self.sigma_filter[n, t+1] = self.sigma_filter[n, t] + self.sigma_1
         else:
-            self.kgain[n, t+1] = (self.sigma_0 + t * self.sigma_1) / (self.sigma_0 + t * self.sigma_1 + self.sigma_2)
             mu_pred = self.mu_filter[n, t] 
-            self.mu_filter[n, t+1] = mu_pred + self.kgain[n, t+1] * (self.y[n, t+1] - mu_pred - self.added_effect(n, t+1))
             sigma_pred = self.sigma_filter[n, t] + self.sigma_1
+            self.kgain[n, t+1] = sigma_pred / (sigma_pred + self.sigma_2)
+            self.mu_filter[n, t+1] = mu_pred + self.kgain[n, t+1] * (self.y[n, t+1] - mu_pred - self.added_effect(n, t+1))
             self.sigma_filter[n, t+1] = (1 - self.kgain[n, t+1]) * sigma_pred
     
     # kalman filter for each time point, message passing forward
@@ -239,6 +240,7 @@ class EM:
         for i in range(max_num_iter):
             self.E_step()
             self.M_step()
+            #print('iteration {}'.format(i))
             new_ll = self.obs_log_lik()
             #print('observed log likelihood {}'.format(new_ll))
             self.log_lik.append(new_ll)
@@ -255,7 +257,6 @@ class EM:
                 print('{} iterations before convergence'.format(i+1))
                 return
             '''
-            #print('iteration {}'.format(i))
             #print('mse {}'.format(self.get_MSE()))
         print('max iterations: {} reached'.format(max_num_iter))
     
@@ -300,9 +301,11 @@ class EM:
         else:
             return 0
 
+
     # calculate the observed data (training) log likelihood 
     def obs_log_lik(self):
         log_lik = 0
+        '''
         for n in range(self.num_patients):
             for t in range(self.last_train_obs[n]):
                 if np.isnan(self.y[n, t]):
@@ -310,4 +313,27 @@ class EM:
                 mean = self.mu_smooth[n, t] + self.added_effect(n, t)
                 std = np.sqrt(self.sigma_2)
                 log_lik += norm.logpdf(self.y[n, t], mean, std)
+
+        for n in range(self.num_patients):
+            idv_loglik = 0
+            p_y1 = norm.logpdf(self.y[n, 0], self.init_z, np.sqrt(self.sigma_0))
+            idv_loglik += p_y1
+            for t in range(1, self.last_train_obs[n]):
+                p_yt_zt = lambda zt: norm.pdf(self.y[n, t], zt+self.added_effect(n, t), np.sqrt(self.sigma_2))
+                p_zt_zt_1 = lambda zt, zt_1: norm.pdf(zt, zt_1, np.sqrt(self.sigma_1))
+                p_zt_1_yt_1 = lambda zt_1: norm.pdf(zt_1, self.mu_filter[n, t-1], np.sqrt(self.sigma_filter[n, t-1]))
+                func = lambda zt, zt_1: p_yt_zt(zt) * p_zt_zt_1(zt, zt_1) * p_zt_1_yt_1(zt_1)
+                idv_loglik += np.log(integrate.nquad(func, [[-np.inf, np.inf], [-np.inf, np.inf]]))
+            log_lik += idv_loglik
+        '''
+        for n in range(self.num_patients):
+            idv_loglik = 0
+            p_y1 = norm.logpdf(self.y[n, 0], self.init_z, np.sqrt(self.sigma_0))
+            idv_loglik += p_y1
+            for t in range(1, self.last_train_obs[n]):
+                p_yt_zt = norm.logpdf(self.y[n, t], self.mu_filter[n, t]+self.added_effect(n, t), np.sqrt(self.sigma_2))
+                p_zt_zt_1 = norm.logpdf(self.mu_filter[n, t], self.mu_filter[n, t-1], np.sqrt(self.sigma_1))
+                p_zt_1_yt_1 = norm.logpdf(self.mu_filter[n, t-1], self.mu_filter[n, t-1], np.sqrt(self.sigma_filter[n, t-1]))
+                idv_loglik += p_yt_zt + p_zt_zt_1 + p_zt_1_yt_1
+            log_lik += idv_loglik
         return log_lik
