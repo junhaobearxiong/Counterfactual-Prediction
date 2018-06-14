@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import pickle
 
 class EM:
-    def __init__(self, y, X, c, J, K, train_pct, single_effect=False):
+    def __init__(self, y, X, c, J, K, train_pct, single_effect=False, init_A_mean=.1, init_b_mean=-.1):
         # Store inputs
         self.num_patients = np.shape(y)[0] 
         self.T = np.shape(y)[1] # length of the observed sequence
@@ -35,10 +35,10 @@ class EM:
         
         # Model Parameters to be estimated
         if self.single_effect:
-            self.A = np.full(self.N, .1) + np.random.randn(self.N)*0.01
+            self.A = np.full(self.N, init_A_mean) + np.random.randn(self.N)*0.01
         else:
-            self.A = np.full((self.J, self.N), .1) + np.random.randn(self.J, self.N)*0.01 # coefficients a_j's
-        self.b = np.random.randn(self.M)*0.01 #np.full(self.M, .1) + np.random.randn(self.M)*0.01
+            self.A = np.full((self.J, self.N), init_A_mean) + np.random.randn(self.J, self.N)*0.01 # coefficients a_j's
+        self.b = np.full(self.M, init_b_mean) + np.random.randn(self.M)*0.01
         self.d = np.zeros(self.K)
         self.sigma_1 = .05
         self.sigma_2 = .005

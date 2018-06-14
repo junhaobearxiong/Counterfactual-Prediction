@@ -1,6 +1,22 @@
 import numpy as np
 import math
 
+''' 
+Preprocessing
+* Choose only the data point that has at least a certain number of observations
+based on the 'cutoff' argument
+* Make each time series (both obs and treatments) start at the time of the 
+first observation
+* Bin time series
+    * Number of bins is determined by: ceil(bin size / largest last observation 
+    time)
+    * If there are multiple observations in a bin, average the values
+    * If there are multiple treatments of the same kind in a bin, store the number
+    of treatments given
+* Convert observations, treatment, static conditions (chronic and age) into 
+matrix form
+'''
+
 # select the data based on a cutoff on the number of observations, default to 5
 def cutoff_num_obs(data, cutoff):
     new_data = []
@@ -96,7 +112,7 @@ def get_missing_pct_single(y):
     # the missing percentage of each patient is calculated by dividing the total number of time points between the first
     # and last observations by the number of nans between the first and last observations 
     missing_pct = np.where(np.isnan(y_cuttail))[0].shape[0] / y_cuttail.shape[0]
-    return missing_pct * 100
+    return missing_pct
 
 def get_missing_pct_total(y):
     y_cuttail = {}
@@ -111,12 +127,12 @@ def get_missing_pct_total(y):
         pct = np.where(np.isnan(obs))[0].shape[0] / obs.shape[0]
         missing_pct += pct
     missing_pct /= len(y_cuttail)
-    return missing_pct * 100
+    return missing_pct
 
-def get_c(data, missing_list):
+# num_c is the number of elements in the c vector
+def get_c(data, missing_list, num_c=3):
     #c_mtx = np.zeros((len(data), 3))
     c_list = []
-    c_length = 3
     for i, d in enumerate(data):
         if i in missing_list:
             continue
@@ -124,14 +140,18 @@ def get_c(data, missing_list):
         #c_mtx[i, :] = c
         c_list.append(c)
     c_mtx = np.concatenate(c_list)
-    c_mtx = np.reshape(c_mtx, (len(c_list), c_length))
+    c_mtx = np.reshape(c_mtx, (len(c_list), num_c))
     return c_mtx
 
-def preprocess(data, cutoff, bin_size, missing_pct=30):
+# if c_zero is true, set the c vector to zero
+def preprocess(data, cutoff, bin_size, missing_pct=30, num_c=3, c_zero=False):
     data = cutoff_num_obs(data, cutoff)
     data = align_time_series(data)
     bins = get_bins(data, bin_size)
     y, missing_list = binning_y(data, bins, missing_pct)
     X = binning_X(data, bins, missing_list)
-    c = get_c(data, missing_list)
+    if c_zero:
+        c = np.zeros((y.shape[0], num_c))
+    else:
+        c = get_c(data, missing_list, num_c)
     return (y, X, c)
