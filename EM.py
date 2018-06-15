@@ -10,12 +10,30 @@ import random
 import matplotlib.pyplot as plt
 import pickle
 
+'''
+EM object can perform the following:
+1. Inference and parameters estimation
+2. Predict ahead based on the learned parameters
+3. Calculate prediction MSE
+'''
 class EM:
+    '''
+    Parameter list:
+    y: observations, shape: [number of patients * number of time points]
+    X: treatments, shape: [number of patients * number of time points * number of types of treatments]
+    c: static conditions (chronics and demographics), shape: [number of patients * number of types of static conditions]
+    J: number of past treatments to consider
+    K: number of interaction effects to model (NOT implemented yet)
+    train_pct: percentage of EACH observation time series to use for training
+    single_effect: whether to consider only the effect of one treatment in the past
+    init_A_mean: the initial mean of coefficients in A
+    init_b_mean: the initial mean of coefficients in b
+    '''
     def __init__(self, y, X, c, J, K, train_pct, single_effect=False, init_A_mean=.1, init_b_mean=-.1):
         # Store inputs
         self.num_patients = np.shape(y)[0] 
         self.T = np.shape(y)[1] # length of the observed sequence
-        self.y = y
+        self.y = y # observation matrix
         self.X = X # treatment matrix
         self.c = c # chronic conditions
         self.K = K  # number of interaction terms modeled
@@ -24,8 +42,8 @@ class EM:
 
         self.train_pct = train_pct # percentage of each time series used for training
         # time of last observations for each patients plus one
-        # plus one because last_obs and last_train_obs effectively take the role of T in the most basic version
-        # T represents the position right after the end of 'valid' values in an array 
+        # plus one because last_obs and last_train_obs effectively
+        # represents the position right after the end of 'valid' values in an array 
         self.last_obs = self.find_last_obs()
         # time of last observation for training plus one 
         self.last_train_obs = self.find_last_train_obs()
@@ -47,7 +65,7 @@ class EM:
         self.sigma_0 = .05 # initial state variance
         self.init_z = np.random.normal(0, np.sqrt(self.sigma_0), size = 1)# np.random.uniform(0, 10, size = 1) # initial state mean
         
-        # create coefficient matrix
+        # create coefficient matrix used to learn the coefficients
         mtx = []
         for n in range(self.num_patients):
             columns = []
@@ -93,6 +111,8 @@ class EM:
             last_non_nan[i] = np.where(np.invert(np.isnan(self.y[i, :])))[0][-1] + 1
         return last_non_nan
     
+    # find the position of the last observation used for training
+    # return the index right after that position
     def find_last_train_obs(self):
         last_train_obs = np.zeros(self.y.shape[0], dtype=int)
         for i in range(self.y.shape[0]):
@@ -159,6 +179,7 @@ class EM:
                 self.sigma_ahead_smooth[n, t] = self.sigma_filter[n, t+1] * self.jgain[n, t] + \
                     self.jgain[n, t+1] * (self.sigma_ahead_smooth[n, t+1] - self.sigma_filter[n, t+1]) * self.jgain[n, t]
     
+    # compute P_t_t-1
     def calc_mu_ahead_smooth(self):
         for n in range(self.num_patients):
             for t in range(self.last_train_obs[n]-1):
@@ -196,12 +217,16 @@ class EM:
         result /= self.num_patients
         self.init_z = result
     
+    # M step updates for pi_t is pi_t = y_t - E[z_t] for all t
+    # to recover the coefficients A and b in pi_t, we use linear least square
+    # to solve a system of linear equations 
     def pi_mle(self):
         rhs_list = []
         for n in range(self.num_patients):
             rhs = np.subtract(self.y[n, :self.last_train_obs[n]], self.mu_smooth[n, :self.last_train_obs[n]])
             rhs = np.delete(rhs, np.where(np.isnan(rhs))[0])
             rhs_list.append(rhs)
+        # rhs: y_t - E[z_t]
         rhs_concat = np.concatenate(rhs_list, axis = 0)
         params = np.linalg.lstsq(self.coeff_mtx, rhs_concat, rcond=None)[0] # params as a long vector
         if self.single_effect:
@@ -234,29 +259,29 @@ class EM:
         self.pi_mle()
         self.sigma_2_mle()
         
-    '''Run EM for fixed iterations or until convergence'''
+    '''Run EM for fixed iterations or until paramters converge'''
     def run_EM(self, max_num_iter, tol=.01):
         old_ll = -np.inf
+        prev = np.zeros(self.params.shape)
         for i in range(max_num_iter):
             self.E_step()
             self.M_step()
             #print('iteration {}'.format(i))
-            new_ll = self.obs_log_lik()
+            #new_ll = self.obs_log_lik()
             #print('observed log likelihood {}'.format(new_ll))
-            self.log_lik.append(new_ll)
+            #self.log_lik.append(new_ll)
             '''
             if np.abs(new_ll - old_ll) < tol:
                 print('{} iterations before convergence'.format(i+1))
                 return
             '''
-            old_ll = new_ll
-            '''
+            #old_ll = new_ll
+            
             diff = np.absolute(np.subtract(prev, self.params))
-            if np.all(diff < tol) and abs(self.sigma_1 - prev_sigma_1) < tol and abs(self.sigma_2 - prev_sigma_2) < tol \
-                and abs(self.init_z - prev_init_z) < tol and abs(self.sigma_0 - prev_sigma_0) < tol:
+            if np.all(diff < tol):
                 print('{} iterations before convergence'.format(i+1))
                 return
-            '''
+            prev = self.params
             #print('mse {}'.format(self.get_MSE()))
         print('max iterations: {} reached'.format(max_num_iter))
     
@@ -271,7 +296,8 @@ class EM:
         y = mean #np.random.normal(mean, np.sqrt(self.sigma_2), 1)
         return y
     
-    # given parameters and latent state
+    # given parameters and a sequence latent states up to the last training observation
+    # predict the latent state (z) and observation (y) up to the last observation
     def predict(self, n):
         y = np.zeros(self.last_obs[n])
         z = np.zeros(self.last_obs[n])

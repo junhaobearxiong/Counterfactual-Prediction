@@ -2,12 +2,14 @@
 
 Create counterfactual trajectory of a signal given past trajectory and some contexts.
 
-### Modeling choices
-* Cutoff (only consider the data point with at least certain number of observations): 5 --> 2214 data points, 215 bins
-* Bin size (length of time interval used to bin the time series): 18 hrs
-* Parameters initialization
-    * Both treatment and static coefficients: Gaussian with mean 0.1 plus small white noise
-* Missingness
-    * After binning the data, only consider the data points with less than 30% missing observations
-* Chronic conditions and age
-    * Set to zero
+### Files Description
+* Python files
+    * preprocess.py: preprocess data into format usable for EM.py
+    * EM.py: perform inference and parameter estimation
+    * plot.py: plot predicted states and observations
+    * EM_individual_params: EM for learning individual parameters (incomplete)
+* Notebook files
+    * DLM: contain simulated data to evaluate model's performance
+    * Population Level Analysis: assume the same set of parameters for all patients; fit to real data
+    * Individual Level Analysis: assume a set of parameters for each patients; fit to real data
+    * Source Data Analysis: some analysis on the real data set before and after preprocessing
