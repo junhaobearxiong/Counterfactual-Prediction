@@ -130,7 +130,7 @@ class EM:
                 if t-1 >= j:
                     treatment_effect += np.dot(self.A[j, :], self.X[n, t-1-j, :])
         pi = treatment_effect + np.dot(self.b, self.c[n, :]) # total added effect
-        pi = self.y[n, t] - self.mu_smooth[n, t]
+        #pi = self.y[n, t] - self.mu_smooth[n, t] # this line is used for debugging 
         return pi
     
     '''E Step Calculations'''
