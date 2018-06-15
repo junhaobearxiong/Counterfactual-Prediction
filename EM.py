@@ -130,6 +130,7 @@ class EM:
                 if t-1 >= j:
                     treatment_effect += np.dot(self.A[j, :], self.X[n, t-1-j, :])
         pi = treatment_effect + np.dot(self.b, self.c[n, :]) # total added effect
+        pi = self.y[n, t] - self.mu_smooth[n, t]
         return pi
     
     '''E Step Calculations'''
@@ -267,21 +268,20 @@ class EM:
             self.E_step()
             self.M_step()
             #print('iteration {}'.format(i))
-            #new_ll = self.obs_log_lik()
+            new_ll = self.obs_log_lik()
             #print('observed log likelihood {}'.format(new_ll))
-            #self.log_lik.append(new_ll)
-            '''
+            self.log_lik.append(new_ll)
             if np.abs(new_ll - old_ll) < tol:
                 print('{} iterations before convergence'.format(i+1))
                 return
+            old_ll = new_ll
             '''
-            #old_ll = new_ll
-            
             diff = np.absolute(np.subtract(prev, self.params))
             if np.all(diff < tol):
                 print('{} iterations before convergence'.format(i+1))
                 return
             prev = self.params
+            '''
             #print('mse {}'.format(self.get_MSE()))
         print('max iterations: {} reached'.format(max_num_iter))
     
@@ -329,37 +329,21 @@ class EM:
 
 
     # calculate the observed data (training) log likelihood 
+    # each sum is up to the last training observation, so different for each patient
+    # the sum in the third term only considers time where observation is not missing
     def obs_log_lik(self):
         log_lik = 0
-        '''
+        log_lik += -self.num_patients * np.log(self.sigma_0)/2
         for n in range(self.num_patients):
-            for t in range(self.last_train_obs[n]):
-                if np.isnan(self.y[n, t]):
-                    continue
-                mean = self.mu_smooth[n, t] + self.added_effect(n, t)
-                std = np.sqrt(self.sigma_2)
-                log_lik += norm.logpdf(self.y[n, t], mean, std)
-
-        for n in range(self.num_patients):
-            idv_loglik = 0
-            p_y1 = norm.logpdf(self.y[n, 0], self.init_z, np.sqrt(self.sigma_0))
-            idv_loglik += p_y1
-            for t in range(1, self.last_train_obs[n]):
-                p_yt_zt = lambda zt: norm.pdf(self.y[n, t], zt+self.added_effect(n, t), np.sqrt(self.sigma_2))
-                p_zt_zt_1 = lambda zt, zt_1: norm.pdf(zt, zt_1, np.sqrt(self.sigma_1))
-                p_zt_1_yt_1 = lambda zt_1: norm.pdf(zt_1, self.mu_filter[n, t-1], np.sqrt(self.sigma_filter[n, t-1]))
-                func = lambda zt, zt_1: p_yt_zt(zt) * p_zt_zt_1(zt, zt_1) * p_zt_1_yt_1(zt_1)
-                idv_loglik += np.log(integrate.nquad(func, [[-np.inf, np.inf], [-np.inf, np.inf]]))
-            log_lik += idv_loglik
-        '''
-        for n in range(self.num_patients):
-            idv_loglik = 0
-            p_y1 = norm.logpdf(self.y[n, 0], self.init_z, np.sqrt(self.sigma_0))
-            idv_loglik += p_y1
-            for t in range(1, self.last_train_obs[n]):
-                p_yt_zt = norm.logpdf(self.y[n, t], self.mu_filter[n, t]+self.added_effect(n, t), np.sqrt(self.sigma_2))
-                p_zt_zt_1 = norm.logpdf(self.mu_filter[n, t], self.mu_filter[n, t-1], np.sqrt(self.sigma_1))
-                p_zt_1_yt_1 = norm.logpdf(self.mu_filter[n, t-1], self.mu_filter[n, t-1], np.sqrt(self.sigma_filter[n, t-1]))
-                idv_loglik += p_yt_zt + p_zt_zt_1 + p_zt_1_yt_1
-            log_lik += idv_loglik
+            inr_index = np.where(np.invert(np.isnan(self.y[n, :self.last_train_obs[n]])))[0]
+            inr = self.y[n, inr_index]
+            const = -(self.last_train_obs[n]-1)/2*np.log(self.sigma_1)-inr_index.shape[0]/2*np.log(self.sigma_2)
+            first_term = -1/(2*self.sigma_0)*(self.mu_square_smooth[n, 0]-2*self.init_z*self.mu_smooth[n, 0]+np.square(self.init_z))
+            second_term = -1/(2*self.sigma_1)*np.sum(np.delete(self.mu_square_smooth[n, :self.last_train_obs[n]]+np.roll(self.mu_square_smooth[n, :self.last_train_obs[n]], shift=-1), -1) \
+                - 2*self.mu_ahead_smooth[n, :self.last_train_obs[n]-1])
+            pi = np.zeros_like(inr)
+            for i, t in enumerate(inr_index):
+                pi[i] = self.added_effect(n, t)
+            third_term = -1/(2*self.sigma_2)*np.sum(np.square(inr-pi)-2*np.multiply(inr-pi, self.mu_smooth[n, inr_index])+self.mu_square_smooth[n, inr_index]) 
+            log_lik += const + first_term + second_term + third_term
         return log_lik

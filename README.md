@@ -3,6 +3,8 @@
 Create counterfactual trajectory of a signal given past trajectory and some contexts.
 
 ### Files Description
+* PDF file
+    * Detailed write up of the model
 * Python files
     * preprocess.py: preprocess data into format usable for EM.py
     * EM.py: perform inference and parameter estimation
