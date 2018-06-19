@@ -239,6 +239,53 @@ class EM:
             self.d = np.array(params[self.N*self.J+self.M:])
         self.params = params 
     
+    # helper function to find the index of valid (not nan) inr measurement for 
+    # patient n, return the indices and the corresponding inr values
+    def find_valid_inr(self, n):
+        inr_index = np.where(np.invert(np.isnan(self.y[n, :self.last_train_obs[n]])))[0]
+        inr = self.y[n, inr_index]
+        return (inr_index, inr)
+
+    def A_mle(self):
+        for j in range(self.J):
+            for treatment in range(self.N):
+                result = 0 # storing the result of the summation
+                divisor = 0 # storing the value of the sum in the denominator
+                for n in range(self.num_patients):
+                    inr_index, inr = self.find_valid_inr(n)
+                    extra = np.zeros_like(inr)
+                    x_t = np.zeros_like(inr)
+                    for i, t in enumerate(inr_index):
+                        extra[i] = self.added_effect(n, t)
+                        if t >= j+1:
+                            x_t[i] = self.X[n, t-j-1, treatment]
+                        extra[i] -= self.A[j, treatment] * x_t[i]
+                    result += np.sum(np.multiply(inr-self.mu_smooth[n, inr_index]-extra, x_t))
+                    divisor += np.sum(np.square(x_t))
+                # none of the effect is contributed by this coefficient
+                # then set it to zero
+                if divisor == 0:
+                    self.A[j, treatment] = 0
+                else:
+                    self.A[j, treatment] = result / divisor
+
+    def b_mle(self):
+        for m in range(self.M):
+            result = 0
+            divisor = 0 # number of times the term involving b_i is included in the sum
+            for n in range(self.num_patients):
+                inr_index, inr = self.find_valid_inr(n)
+                extra = np.zeros_like(inr)
+                for i, t in enumerate(inr_index):
+                    extra[i] = self.added_effect(n, t)
+                    extra[i] -= self.b[m] * self.c[n, m]
+                result += self.c[n, m]*np.sum(inr-self.mu_smooth[n, inr_index]-extra)
+                divisor += np.square(self.c[n, m]) * inr_index.shape[0]
+            if divisor == 0:
+                self.b[m] = 0
+            else:
+                self.b[m] = result / divisor
+
     def sigma_2_mle(self):
         result = 0
         for n in range(self.num_patients):
@@ -258,6 +305,8 @@ class EM:
         self.sigma_0_mle()
         self.sigma_1_mle()
         self.pi_mle()
+        #self.A_mle()
+        #self.b_mle()
         self.sigma_2_mle()
         
     '''Run EM for fixed iterations or until paramters converge'''
