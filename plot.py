@@ -25,7 +25,7 @@ def plot(em, n, bin_size, true_model=False, model=None):
         plt.plot(times, y, label = 'predicted observed values', color='g', linestyle='--')
     if true_model:
         plt.plot(times, model.z[n, 0:em.last_obs[n]], label = 'actual state values')
-        #plt.plot(times, em.mu_smooth[n, 0:em.last_obs[n]], color='m', label = 'predicted state values')
+        plt.plot(times, em.mu_smooth[n, 0:em.last_obs[n]], color='m', label = 'predicted state values')
     plt.plot(times[0:em.last_train_obs[n]], em.y[n, 0:em.last_train_obs[n]], '.', label = 'actual observed values (for training)', color='b')
     plt.plot(times[em.last_train_obs[n]:em.last_obs[n]], em.y[n, em.last_train_obs[n]:em.last_obs[n]], '.', label = 'actual observed values (for testing)', color='r')
     colors = ['b', 'y', 'c', 'r', 'm']
@@ -35,7 +35,7 @@ def plot(em, n, bin_size, true_model=False, model=None):
             if t >= em.last_obs[n]:
                 break
             plt.axvline(x=t * time_unit, linestyle=':', color=colors[treatment], label=treatment_types[treatment])
-    #plt.plot(times[0:em.last_train_obs[n]], em.mu_filter[n, 0:em.last_train_obs[n]], label='filtered values')
+    plt.plot(times[0:em.last_train_obs[n]], em.mu_filter[n, 0:em.last_train_obs[n]], label='filtered values')
     plt.xlabel('time (hrs)')
     plt.ylabel('INR')
     plt.title('Model Results')

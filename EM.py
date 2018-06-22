@@ -57,8 +57,10 @@ class EM:
         if self.single_effect:
             self.A = np.full(self.N, init_A_mean) + np.random.randn(self.N)*0.01
         else:
-            self.A = np.full((self.J, self.N), init_A_mean) + np.random.randn(self.J, self.N)*0.01 # coefficients a_j's
-        self.b = np.full(self.M, init_b_mean) + np.random.randn(self.M)*0.01
+            self.A = np.zeros((self.J, self.N)) 
+            #self.A = np.full((self.J, self.N), init_A_mean) + np.random.randn(self.J, self.N)*0.01 # coefficients a_j's
+        self.b = np.zeros(self.M)
+        #self.b = np.full(self.M, init_b_mean) + np.random.randn(self.M)*0.01
         self.d = np.zeros(self.K)
         self.sigma_1 = .05
         self.sigma_2 = .005
@@ -100,7 +102,8 @@ class EM:
         self.mu_square_smooth = np.zeros((self.num_patients, self.T)) # E[z_t^2|{y}]
         self.mu_ahead_smooth = np.zeros((self.num_patients, self.T)) # E[z_t * z_{t-1}|{y}]
         self.sigma_ahead_smooth = np.zeros((self.num_patients, self.T))
-
+        self.mu_pred = np.zeros((self.num_patients, self.T)) # mu_t-1|t
+        self.sigma_pred = np.zeros((self.num_patients, self.T)) # sigma^2_t-1|t
         self.log_lik = [] # used to debug
     
     # find the last non-nan y value for training for each patient
@@ -136,30 +139,35 @@ class EM:
     '''E Step Calculations'''
     # kalman filter update step
     def kfilter(self, n, t):
-        if np.isnan(self.y[n, t+1]):
-            self.mu_filter[n, t+1] = self.mu_filter[n, t]
-            self.sigma_filter[n, t+1] = self.sigma_filter[n, t] + self.sigma_1
+        self.mu_pred[n, t] = self.mu_filter[n, t-1] 
+        self.sigma_pred[n, t] = self.sigma_filter[n, t-1] + self.sigma_1
+        if np.isnan(self.y[n, t]):
+            self.mu_filter[n, t] = self.mu_pred[n, t]
+            self.sigma_filter[n, t] = self.sigma_pred[n, t]
         else:
-            mu_pred = self.mu_filter[n, t] 
-            sigma_pred = self.sigma_filter[n, t] + self.sigma_1
-            self.kgain[n, t+1] = sigma_pred / (sigma_pred + self.sigma_2)
-            self.mu_filter[n, t+1] = mu_pred + self.kgain[n, t+1] * (self.y[n, t+1] - mu_pred - self.added_effect(n, t+1))
-            self.sigma_filter[n, t+1] = (1 - self.kgain[n, t+1]) * sigma_pred
+             #sigma_pred = self.sigma_filter[n, t] + self.sigma_1
+            self.kgain[n, t] = self.sigma_pred[n, t] / (self.sigma_pred[n, t] + self.sigma_2)
+            self.mu_filter[n, t] = self.mu_pred[n, t] + self.kgain[n, t] * (self.y[n, t] - self.mu_pred[n, t] - self.added_effect(n, t))
+            self.sigma_filter[n, t] = (1 - self.kgain[n, t]) * self.sigma_pred[n, t]
     
     # kalman filter for each time point, message passing forward
     def forward(self):
         for n in range(self.num_patients):
-            self.mu_filter[n, 0] = self.init_z
-            self.sigma_filter[n, 0] = self.sigma_0
-            for t in range(self.last_train_obs[n]-1):
+            # initialization and the first iteration
+            self.mu_pred[n, 0] = self.init_z #self.mu_filter[n, 0] = self.init_z
+            self.sigma_pred[n, 0] = self.sigma_0 #self.sigma_filter[n, 0] = self.sigma_0
+            self.kgain[n, 0] = self.sigma_pred[n, 0] / (self.sigma_pred[n, 0] + self.sigma_2)
+            self.mu_filter[n, 0] = self.mu_pred[n, 0] + self.kgain[n, 0] * (self.y[n, 0] - self.mu_pred[n, 0] - self.added_effect(n, 0))
+            self.sigma_filter[n, 0] = (1 - self.kgain[n, 0]) * self.sigma_pred[n, 0]
+            for t in range(1, self.last_train_obs[n]):
                 self.kfilter(n, t)
-    
+
     # kalman smoother update step
     def ksmoother(self, n, t):
-        sigma_pred = self.sigma_filter[n, t] + self.sigma_1 # sigma^2_t+1|t
-        self.jgain[n, t] = self.sigma_filter[n, t] / sigma_pred
-        self.mu_smooth[n, t] = self.mu_filter[n, t] + self.jgain[n, t] * (self.mu_smooth[n, t+1] - self.mu_filter[n, t])
-        self.sigma_smooth[n, t] = self.sigma_filter[n, t] + np.square(self.jgain[n, t]) * (self.sigma_smooth[n, t+1] - sigma_pred)
+        #sigma_pred = self.sigma_filter[n, t] + self.sigma_1 # sigma^2_t+1|t
+        self.jgain[n, t] = self.sigma_filter[n, t] / self.sigma_pred[n, t+1]
+        self.mu_smooth[n, t] = self.mu_filter[n, t] + self.jgain[n, t] * (self.mu_smooth[n, t+1] - self.mu_pred[n, t])
+        self.sigma_smooth[n, t] = self.sigma_filter[n, t] + np.square(self.jgain[n, t]) * (self.sigma_smooth[n, t+1] - self.sigma_pred[n, t+1])
         self.mu_square_smooth[n, t] = self.sigma_smooth[n, t] + np.square(self.mu_smooth[n, t])
     
     def backward(self):
@@ -304,7 +312,7 @@ class EM:
         self.init_z_mle()
         self.sigma_0_mle()
         self.sigma_1_mle()
-        self.pi_mle()
+        #self.pi_mle()
         #self.A_mle()
         #self.b_mle()
         self.sigma_2_mle()
@@ -315,11 +323,16 @@ class EM:
         prev = np.zeros(self.params.shape)
         for i in range(max_num_iter):
             self.E_step()
+            #print('lik after E step {}'.format(self.obs_log_lik()))
             self.M_step()
+            #print('lik after M step {}'.format(self.obs_log_lik()))
             #print('iteration {}'.format(i))
             new_ll = self.obs_log_lik()
             #print('observed log likelihood {}'.format(new_ll))
             self.log_lik.append(new_ll)
+            if np.isnan(new_ll):
+                print('encounter nan at iteration {}'.format(i))
+                break
             if np.abs(new_ll - old_ll) < tol:
                 print('{} iterations before convergence'.format(i+1))
                 return
