@@ -15,6 +15,8 @@ EM object can perform the following:
 1. Inference and parameters estimation
 2. Predict ahead based on the learned parameters
 3. Calculate prediction MSE
+
+Derivation of the EM update and the corresponding notations are in Ghahramani 1996
 '''
 class EM:
     '''
@@ -62,12 +64,14 @@ class EM:
         self.b = np.zeros(self.M)
         #self.b = np.full(self.M, init_b_mean) + np.random.randn(self.M)*0.01
         self.d = np.zeros(self.K)
-        self.sigma_1 = .05
-        self.sigma_2 = .005
-        self.sigma_0 = .05 # initial state variance
+        self.sigma_1 = .05 #+ np.random.randn()*0.01
+        self.sigma_2 = .005 #+ np.random.randn()*0.01
+        self.sigma_0 = .05 #+ np.random.randn()*0.01 # initial state variance
         self.init_z = np.random.normal(0, np.sqrt(self.sigma_0), size = 1)# np.random.uniform(0, 10, size = 1) # initial state mean
         
         # create coefficient matrix used to learn the coefficients
+        '''
+        Not used in the current version
         mtx = []
         for n in range(self.num_patients):
             columns = []
@@ -91,8 +95,9 @@ class EM:
             coeff_mtx = np.delete(coeff_mtx, nans, axis = 0)
             mtx.append(coeff_mtx)
         self.coeff_mtx = np.concatenate(mtx, axis = 0)        
-        
-        # Intermediate values to stored
+        '''
+
+        # Intermediate values to stored for Kalman filter and smoother computations
         self.mu_filter = np.zeros((self.num_patients, self.T)) # mu_t|t
         self.sigma_filter = np.zeros((self.num_patients, self.T)) # sigma^2_t|t
         self.kgain = np.zeros((self.num_patients, self.T)) # K_t, kalman gain
@@ -101,13 +106,13 @@ class EM:
         self.sigma_smooth = np.zeros((self.num_patients, self.T)) # sigma^2_t|T
         self.mu_square_smooth = np.zeros((self.num_patients, self.T)) # E[z_t^2|{y}]
         self.mu_ahead_smooth = np.zeros((self.num_patients, self.T)) # E[z_t * z_{t-1}|{y}]
-        self.sigma_ahead_smooth = np.zeros((self.num_patients, self.T))
+        self.sigma_ahead_smooth = np.zeros((self.num_patients, self.T)) # V[t, t-1 | T]
         self.mu_pred = np.zeros((self.num_patients, self.T)) # mu_t-1|t
         self.sigma_pred = np.zeros((self.num_patients, self.T)) # sigma^2_t-1|t
         self.log_lik = [] # used to debug
     
     # find the last non-nan y value for training for each patient
-    # return an array of the length num_patients
+    # return an array with the length num_patients
     def find_last_obs(self):
         last_non_nan = np.zeros(self.y.shape[0], dtype=int)
         for i in range(self.y.shape[0]):
@@ -141,11 +146,13 @@ class EM:
     def kfilter(self, n, t):
         self.mu_pred[n, t] = self.mu_filter[n, t-1] 
         self.sigma_pred[n, t] = self.sigma_filter[n, t-1] + self.sigma_1
+        # updates for when observation is missing
+        # taken from Durbin & Koopman textbook
         if np.isnan(self.y[n, t]):
             self.mu_filter[n, t] = self.mu_pred[n, t]
             self.sigma_filter[n, t] = self.sigma_pred[n, t]
         else:
-             #sigma_pred = self.sigma_filter[n, t] + self.sigma_1
+            #sigma_pred = self.sigma_filter[n, t] + self.sigma_1
             self.kgain[n, t] = self.sigma_pred[n, t] / (self.sigma_pred[n, t] + self.sigma_2)
             self.mu_filter[n, t] = self.mu_pred[n, t] + self.kgain[n, t] * (self.y[n, t] - self.mu_pred[n, t] - self.added_effect(n, t))
             self.sigma_filter[n, t] = (1 - self.kgain[n, t]) * self.sigma_pred[n, t]
@@ -170,6 +177,7 @@ class EM:
         self.sigma_smooth[n, t] = self.sigma_filter[n, t] + np.square(self.jgain[n, t]) * (self.sigma_smooth[n, t+1] - self.sigma_pred[n, t+1])
         self.mu_square_smooth[n, t] = self.sigma_smooth[n, t] + np.square(self.mu_smooth[n, t])
     
+    # backwards message passing
     def backward(self):
         for n in range(self.num_patients):
             self.mu_smooth[n, self.last_train_obs[n]-1] = self.mu_filter[n, self.last_train_obs[n]-1]
@@ -229,6 +237,8 @@ class EM:
     # M step updates for pi_t is pi_t = y_t - E[z_t] for all t
     # to recover the coefficients A and b in pi_t, we use linear least square
     # to solve a system of linear equations 
+    '''
+    Not used in the current version
     def pi_mle(self):
         rhs_list = []
         for n in range(self.num_patients):
@@ -245,7 +255,8 @@ class EM:
             self.A = np.reshape(params[0:self.N*self.J], (self.J, self.N))
             self.b = np.array(params[self.N*self.J:self.N*self.J+self.M])
             self.d = np.array(params[self.N*self.J+self.M:])
-        self.params = params 
+        self.params = params
+    '''
     
     # helper function to find the index of valid (not nan) inr measurement for 
     # patient n, return the indices and the corresponding inr values
@@ -320,8 +331,10 @@ class EM:
     '''Run EM for fixed iterations or until paramters converge'''
     def run_EM(self, max_num_iter, tol=.01):
         old_ll = -np.inf
-        prev = np.zeros(self.params.shape)
         for i in range(max_num_iter):
+            print('init sigma 0 {}'.format(self.sigma_0))
+            print('init sigma 1 {}'.format(self.sigma_1))
+            print('init sigma 2 {}'.format(self.sigma_2))
             self.E_step()
             #print('lik after E step {}'.format(self.obs_log_lik()))
             self.M_step()
@@ -337,13 +350,6 @@ class EM:
                 print('{} iterations before convergence'.format(i+1))
                 return
             old_ll = new_ll
-            '''
-            diff = np.absolute(np.subtract(prev, self.params))
-            if np.all(diff < tol):
-                print('{} iterations before convergence'.format(i+1))
-                return
-            prev = self.params
-            '''
             #print('mse {}'.format(self.get_MSE()))
         print('max iterations: {} reached'.format(max_num_iter))
     
@@ -388,7 +394,6 @@ class EM:
             return sum_of_square / count
         else:
             return 0
-
 
     # calculate the observed data (training) log likelihood 
     # each sum is up to the last training observation, so different for each patient
