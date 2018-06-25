@@ -64,10 +64,10 @@ class EM:
         self.b = np.zeros(self.M)
         #self.b = np.full(self.M, init_b_mean) + np.random.randn(self.M)*0.01
         self.d = np.zeros(self.K)
-        self.sigma_1 = .05 #+ np.random.randn()*0.01
-        self.sigma_2 = .005 #+ np.random.randn()*0.01
         self.sigma_0 = .05 #+ np.random.randn()*0.01 # initial state variance
-        self.init_z = np.random.normal(0, np.sqrt(self.sigma_0), size = 1)# np.random.uniform(0, 10, size = 1) # initial state mean
+        self.sigma_1 = .5 #+ np.random.randn()*0.01
+        self.sigma_2 = .005 #+ np.random.randn()*0.01
+        self.init_z = 0 #np.random.normal(0, np.sqrt(self.sigma_0), size = 1)# np.random.uniform(0, 10, size = 1) # initial state mean
         
         # create coefficient matrix used to learn the coefficients
         '''
@@ -109,8 +109,14 @@ class EM:
         self.sigma_ahead_smooth = np.zeros((self.num_patients, self.T)) # V[t, t-1 | T]
         self.mu_pred = np.zeros((self.num_patients, self.T)) # mu_t-1|t
         self.sigma_pred = np.zeros((self.num_patients, self.T)) # sigma^2_t-1|t
-        self.log_lik = [] # used to debug
+        
+        # used to debug
+        self.log_lik = []
+        self.sigma_0_list = []
+        self.sigma_1_list = []
+        self.sigma_2_list = []
     
+
     # find the last non-nan y value for training for each patient
     # return an array with the length num_patients
     def find_last_obs(self):
@@ -173,7 +179,7 @@ class EM:
     def ksmoother(self, n, t):
         #sigma_pred = self.sigma_filter[n, t] + self.sigma_1 # sigma^2_t+1|t
         self.jgain[n, t] = self.sigma_filter[n, t] / self.sigma_pred[n, t+1]
-        self.mu_smooth[n, t] = self.mu_filter[n, t] + self.jgain[n, t] * (self.mu_smooth[n, t+1] - self.mu_pred[n, t])
+        self.mu_smooth[n, t] = self.mu_filter[n, t] + self.jgain[n, t] * (self.mu_smooth[n, t+1] - self.mu_pred[n, t+1])
         self.sigma_smooth[n, t] = self.sigma_filter[n, t] + np.square(self.jgain[n, t]) * (self.sigma_smooth[n, t+1] - self.sigma_pred[n, t+1])
         self.mu_square_smooth[n, t] = self.sigma_smooth[n, t] + np.square(self.mu_smooth[n, t])
     
@@ -326,15 +332,15 @@ class EM:
         #self.pi_mle()
         #self.A_mle()
         #self.b_mle()
-        self.sigma_2_mle()
+        #self.sigma_2_mle()
         
     '''Run EM for fixed iterations or until paramters converge'''
-    def run_EM(self, max_num_iter, tol=.01):
+    def run_EM(self, max_num_iter, tol=.0001):
         old_ll = -np.inf
+        print('init sigma 0 {}'.format(self.sigma_0))
+        print('init sigma 1 {}'.format(self.sigma_1))
+        print('init sigma 2 {}'.format(self.sigma_2))
         for i in range(max_num_iter):
-            print('init sigma 0 {}'.format(self.sigma_0))
-            print('init sigma 1 {}'.format(self.sigma_1))
-            print('init sigma 2 {}'.format(self.sigma_2))
             self.E_step()
             #print('lik after E step {}'.format(self.obs_log_lik()))
             self.M_step()
@@ -343,6 +349,9 @@ class EM:
             new_ll = self.obs_log_lik()
             #print('observed log likelihood {}'.format(new_ll))
             self.log_lik.append(new_ll)
+            self.sigma_0_list.append(self.sigma_0)
+            self.sigma_1_list.append(self.sigma_1)
+            self.sigma_2_list.append(self.sigma_2)
             if np.isnan(new_ll):
                 print('encounter nan at iteration {}'.format(i))
                 break
@@ -400,17 +409,23 @@ class EM:
     # the sum in the third term only considers time where observation is not missing
     def obs_log_lik(self):
         log_lik = 0
-        log_lik += -self.num_patients * np.log(self.sigma_0)/2
+        log_sigma_0 = -self.num_patients * np.log(self.sigma_0)/2
+        log_lik += log_sigma_0
         for n in range(self.num_patients):
             inr_index = np.where(np.invert(np.isnan(self.y[n, :self.last_train_obs[n]])))[0]
             inr = self.y[n, inr_index]
-            const = -(self.last_train_obs[n]-1)/2*np.log(self.sigma_1)-inr_index.shape[0]/2*np.log(self.sigma_2)
+            log_sigma_1 = -(inr_index.shape[0]-1)/2*np.log(self.sigma_1) #-(self.last_train_obs[n]-1)/2*np.log(self.sigma_1)
+            log_sigma_2 = -inr_index.shape[0]/2*np.log(self.sigma_2)
             first_term = -1/(2*self.sigma_0)*(self.mu_square_smooth[n, 0]-2*self.init_z*self.mu_smooth[n, 0]+np.square(self.init_z))
+            '''
             second_term = -1/(2*self.sigma_1)*np.sum(np.delete(self.mu_square_smooth[n, :self.last_train_obs[n]]+np.roll(self.mu_square_smooth[n, :self.last_train_obs[n]], shift=-1), -1) \
                 - 2*self.mu_ahead_smooth[n, :self.last_train_obs[n]-1])
+            '''
+            second_term = -1/(2*self.sigma_1)*np.sum(np.delete(self.mu_square_smooth[n, inr_index]+np.roll(self.mu_square_smooth[n, inr_index], shift=-1), -1) \
+                - 2*self.mu_ahead_smooth[n, inr_index[:-1]])
             pi = np.zeros_like(inr)
             for i, t in enumerate(inr_index):
                 pi[i] = self.added_effect(n, t)
             third_term = -1/(2*self.sigma_2)*np.sum(np.square(inr-pi)-2*np.multiply(inr-pi, self.mu_smooth[n, inr_index])+self.mu_square_smooth[n, inr_index]) 
-            log_lik += const + first_term + second_term + third_term
+            log_lik += log_sigma_1 + log_sigma_2 + first_term + second_term + third_term
         return log_lik
