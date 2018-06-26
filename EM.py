@@ -64,9 +64,9 @@ class EM:
         self.b = np.zeros(self.M)
         #self.b = np.full(self.M, init_b_mean) + np.random.randn(self.M)*0.01
         self.d = np.zeros(self.K)
-        self.sigma_0 = np.abs(np.random.randn()*0.1) # initial state variance
-        self.sigma_1 = np.abs(np.random.randn())
-        self.sigma_2 = np.abs(np.random.randn()*0.1)
+        self.sigma_0 = .1 #np.abs(np.random.randn()*0.1) # initial state variance
+        self.sigma_1 = 5 #np.abs(np.random.randn())
+        self.sigma_2 = .05 #np.abs(np.random.randn()*0.1)
         self.init_z = 6 #np.random.normal(0, np.sqrt(self.sigma_0), size = 1)# np.random.uniform(0, 10, size = 1) # initial state mean
         
         '''
@@ -120,6 +120,7 @@ class EM:
         self.sigma_0_list = []
         self.sigma_1_list = []
         self.sigma_2_list = []
+        self.pykf_log_lik = []
     
 
     # find the last non-nan y value for training for each patient
@@ -344,8 +345,8 @@ class EM:
         self.sigma_2 = result
         
     def M_step(self):
-        self.init_z_mle()
-        self.sigma_0_mle()
+        #self.init_z_mle()
+        #self.sigma_0_mle()
         self.sigma_1_mle()
         #self.pi_mle()
         #self.A_mle()
@@ -370,6 +371,8 @@ class EM:
             self.sigma_0_list.append(self.sigma_0)
             self.sigma_1_list.append(self.sigma_1)
             self.sigma_2_list.append(self.sigma_2)
+
+            self.pykf_log_lik.append(self.pykalman_log_lik())
             if np.isnan(new_ll):
                 print('encounter nan at iteration {}'.format(i))
                 break
@@ -490,3 +493,13 @@ class EM:
         func_value_2 = self.obs_log_lik()
         self.sigma_1 = orig
         return (func_value_2-func_value_1)/diff
+
+    # the log lik function used by pykalman
+    def pykalman_log_lik(self):
+        n = 0
+        inr_index, inr = self.find_valid_inr(n)
+        log_lik = np.zeros_like(inr)
+        for i, index in enumerate(inr_index):
+            log_lik[i] = scipy.stats.norm.logpdf(self.y[n, index], 
+                self.mu_smooth[n, index], np.sqrt(self.sigma_smooth[n, index]))
+        return np.sum(log_lik)
