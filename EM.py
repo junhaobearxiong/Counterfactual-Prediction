@@ -64,11 +64,16 @@ class EM:
         self.b = np.zeros(self.M)
         #self.b = np.full(self.M, init_b_mean) + np.random.randn(self.M)*0.01
         self.d = np.zeros(self.K)
-        self.sigma_0 = .05 #+ np.random.randn()*0.01 # initial state variance
-        self.sigma_1 = .5 #+ np.random.randn()*0.01
-        self.sigma_2 = .005 #+ np.random.randn()*0.01
-        self.init_z = 0 #np.random.normal(0, np.sqrt(self.sigma_0), size = 1)# np.random.uniform(0, 10, size = 1) # initial state mean
+        self.sigma_0 = np.abs(np.random.randn()*0.1) # initial state variance
+        self.sigma_1 = np.abs(np.random.randn())
+        self.sigma_2 = np.abs(np.random.randn()*0.1)
+        self.init_z = 6 #np.random.normal(0, np.sqrt(self.sigma_0), size = 1)# np.random.uniform(0, 10, size = 1) # initial state mean
         
+        '''
+        self.A = np.array([[-.9, -.8], [-.5, -.3]]) # the coefficients a_j's stored in a matrix
+        self.b = np.array([.6, .4])
+        '''
+
         # create coefficient matrix used to learn the coefficients
         '''
         Not used in the current version
@@ -225,11 +230,17 @@ class EM:
     def sigma_1_mle(self):
         result = 0
         for n in range(self.num_patients):
+            '''
             sum_result = 0
             if self.last_train_obs[n] > 1:
                 for t in range(self.last_train_obs[n]-1):
                     sum_result += self.mu_square_smooth[n, t+1]-2*self.mu_ahead_smooth[n, t]+self.mu_square_smooth[n, t]
                 result += sum_result / (self.last_train_obs[n]-1) 
+            '''
+            inr_index, _ = self.find_valid_inr(n)
+            sum_result = np.sum(np.delete(self.mu_square_smooth[n, inr_index]+np.roll(self.mu_square_smooth[n, inr_index], shift=-1), -1) \
+                - 2*self.mu_ahead_smooth[n, inr_index[:-1]])
+            result += sum_result / (inr_index.shape[0]-1)
         result /= self.num_patients
         self.sigma_1 = result
 
@@ -314,6 +325,7 @@ class EM:
     def sigma_2_mle(self):
         result = 0
         for n in range(self.num_patients):
+            '''
             sum_result = 0
             num_sum = 0
             for t in range(self.last_train_obs[n]):
@@ -321,7 +333,13 @@ class EM:
                     sum_result += np.square(self.y[n, t]-self.added_effect(n, t))-2*(self.y[n, t]-self.added_effect(n, t)) \
                         *self.mu_smooth[n, t] + self.mu_square_smooth[n, t]
                     num_sum += 1
-            result += sum_result / num_sum
+            '''
+            inr_index, inr = self.find_valid_inr(n)
+            pi = np.zeros_like(inr)
+            for i, t in enumerate(inr_index):
+                pi[i] = self.added_effect(n, t)
+            sum_result = np.sum(np.square(inr-pi)-2*np.multiply(inr-pi, self.mu_smooth[n, inr_index])+self.mu_square_smooth[n, inr_index]) 
+            result += sum_result / inr_index.shape[0]
         result /= self.num_patients
         self.sigma_2 = result
         
@@ -332,7 +350,7 @@ class EM:
         #self.pi_mle()
         #self.A_mle()
         #self.b_mle()
-        #self.sigma_2_mle()
+        self.sigma_2_mle()
         
     '''Run EM for fixed iterations or until paramters converge'''
     def run_EM(self, max_num_iter, tol=.0001):
@@ -428,4 +446,47 @@ class EM:
                 pi[i] = self.added_effect(n, t)
             third_term = -1/(2*self.sigma_2)*np.sum(np.square(inr-pi)-2*np.multiply(inr-pi, self.mu_smooth[n, inr_index])+self.mu_square_smooth[n, inr_index]) 
             log_lik += log_sigma_1 + log_sigma_2 + first_term + second_term + third_term
+            '''
+            print('log sigma 1 {}'.format(log_sigma_1))
+            print('log sigma 2 {}'.format(log_sigma_2))
+            print('second term {}'.format(second_term))
+            print('third term {}'.format(third_term))
+            '''
         return log_lik
+
+    def gradient_output_noise(self):
+        n = 0
+        inr_index, inr = self.find_valid_inr(n)
+        first_term = inr_index.shape[n]/2 * self.sigma_2
+        pi = np.zeros_like(inr)
+        for i, t in enumerate(inr_index):
+            pi[i] = self.added_effect(n, t)
+        second_term = -np.sum(1/2*np.square(inr-pi)-np.multiply(inr-pi, 
+            self.mu_smooth[n, inr_index])+1/2*self.mu_square_smooth[n, inr_index]) 
+        return first_term + second_term
+
+    def finite_diff_output_noise(self, diff):
+        func_value_1 = self.obs_log_lik()
+        orig = self.sigma_2
+        self.sigma_2 = 1/(1/self.sigma_2 + diff)
+        func_value_2 = self.obs_log_lik()
+        self.sigma_2 = orig
+        return (func_value_2-func_value_1)/diff
+
+    def gradient_state_noise(self):
+        n = 0
+        inr_index, _ = self.find_valid_inr(n)
+        first_term = (inr_index.shape[0]-1)/2 * self.sigma_1
+        second_term = -1/2*np.sum(np.delete(self.mu_square_smooth[n, inr_index]+np.roll(self.mu_square_smooth[n, inr_index], shift=-1), -1) \
+            - 2*self.mu_ahead_smooth[n, inr_index[:-1]])
+        return first_term + second_term
+    
+    def finite_diff_state_noise(self, diff):
+        func_value_1 = self.obs_log_lik()
+        orig = self.sigma_1
+        print('orig sigma 1 {}'.format(orig))
+        self.sigma_1 = 1/(1/self.sigma_1 + diff)
+        print('perturbed sigma 1 {}'.format(self.sigma_1))
+        func_value_2 = self.obs_log_lik()
+        self.sigma_1 = orig
+        return (func_value_2-func_value_1)/diff
