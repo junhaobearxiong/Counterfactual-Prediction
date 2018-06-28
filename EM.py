@@ -59,16 +59,21 @@ class EM:
         if self.single_effect:
             self.A = np.full(self.N, init_A_mean) + np.random.randn(self.N)*0.01
         else:
-            self.A = np.zeros((self.J, self.N)) 
-            #self.A = np.full((self.J, self.N), init_A_mean) + np.random.randn(self.J, self.N)*0.01 # coefficients a_j's
-        self.b = np.zeros(self.M)
-        #self.b = np.full(self.M, init_b_mean) + np.random.randn(self.M)*0.01
+            #self.A = np.zeros((self.J, self.N)) 
+            self.A = np.full((self.J, self.N), init_A_mean) + np.random.randn(self.J, self.N)*0.01 # coefficients a_j's
+        #self.b = np.zeros(self.M)
+        self.b = np.full(self.M, init_b_mean) + np.random.randn(self.M)*0.01
         self.d = np.zeros(self.K)
-        self.sigma_0 = .1 #np.abs(np.random.randn()*0.1) # initial state variance
-        self.sigma_1 = 5 #np.abs(np.random.randn())
-        self.sigma_2 = .05 #np.abs(np.random.randn()*0.1)
-        self.init_z = 6 #np.random.normal(0, np.sqrt(self.sigma_0), size = 1)# np.random.uniform(0, 10, size = 1) # initial state mean
+        self.sigma_0 = np.abs(np.random.randn()*0.1) # initial state variance
+        self.sigma_1 = np.abs(np.random.randn())
+        self.sigma_2 = np.abs(np.random.randn()*0.1)
+        self.init_z = np.random.normal(0, np.sqrt(self.sigma_0), size = 1)# np.random.uniform(0, 10, size = 1) # initial state mean
         
+        self.init_0 = self.sigma_0
+        self.init_1 = self.sigma_1
+        self.init_2 = self.sigma_2
+        self.init_state = self.init_z
+
         '''
         self.A = np.array([[-.9, -.8], [-.5, -.3]]) # the coefficients a_j's stored in a matrix
         self.b = np.array([.6, .4])
@@ -116,11 +121,8 @@ class EM:
         self.sigma_pred = np.zeros((self.num_patients, self.T)) # sigma^2_t-1|t
         
         # used to debug
-        self.log_lik = []
-        self.sigma_0_list = []
-        self.sigma_1_list = []
-        self.sigma_2_list = []
-        self.pykf_log_lik = []
+        self.expected_log_lik = []
+        self.obs_log_lik = []
     
 
     # find the last non-nan y value for training for each patient
@@ -345,44 +347,30 @@ class EM:
         self.sigma_2 = result
         
     def M_step(self):
-        #self.init_z_mle()
-        #self.sigma_0_mle()
+        self.init_z_mle()
+        self.sigma_0_mle()
         self.sigma_1_mle()
-        #self.pi_mle()
-        #self.A_mle()
-        #self.b_mle()
+        self.A_mle()
+        self.b_mle()
         self.sigma_2_mle()
         
     '''Run EM for fixed iterations or until paramters converge'''
     def run_EM(self, max_num_iter, tol=.0001):
         old_ll = -np.inf
-        print('init sigma 0 {}'.format(self.sigma_0))
-        print('init sigma 1 {}'.format(self.sigma_1))
-        print('init sigma 2 {}'.format(self.sigma_2))
         for i in range(max_num_iter):
             self.E_step()
-            #print('lik after E step {}'.format(self.obs_log_lik()))
             self.M_step()
-            #print('lik after M step {}'.format(self.obs_log_lik()))
-            #print('iteration {}'.format(i))
-            new_ll = self.obs_log_lik()
+            new_ll = self.pykalman_log_lik()
             #print('observed log likelihood {}'.format(new_ll))
-            self.log_lik.append(new_ll)
-            self.sigma_0_list.append(self.sigma_0)
-            self.sigma_1_list.append(self.sigma_1)
-            self.sigma_2_list.append(self.sigma_2)
-
-            self.pykf_log_lik.append(self.pykalman_log_lik())
-            if np.isnan(new_ll):
-                print('encounter nan at iteration {}'.format(i))
-                break
+            self.obs_log_lik.append(new_ll)
             if np.abs(new_ll - old_ll) < tol:
                 print('{} iterations before convergence'.format(i+1))
-                return
+                return i
             old_ll = new_ll
             #print('mse {}'.format(self.get_MSE()))
         print('max iterations: {} reached'.format(max_num_iter))
-    
+        return max_num_iter
+
     def transition(self, prev, n, t):
         noise = self.sigma_filter[n, t-1] + self.sigma_1
         self.sigma_filter[n, t] = noise
@@ -428,7 +416,7 @@ class EM:
     # calculate the observed data (training) log likelihood 
     # each sum is up to the last training observation, so different for each patient
     # the sum in the third term only considers time where observation is not missing
-    def obs_log_lik(self):
+    def expected_complete_log_lik(self):
         log_lik = 0
         log_sigma_0 = -self.num_patients * np.log(self.sigma_0)/2
         log_lik += log_sigma_0
@@ -469,10 +457,10 @@ class EM:
         return first_term + second_term
 
     def finite_diff_output_noise(self, diff):
-        func_value_1 = self.obs_log_lik()
+        func_value_1 = self.expected_complete_log_lik()
         orig = self.sigma_2
         self.sigma_2 = 1/(1/self.sigma_2 + diff)
-        func_value_2 = self.obs_log_lik()
+        func_value_2 = self.expected_complete_log_lik()
         self.sigma_2 = orig
         return (func_value_2-func_value_1)/diff
 
@@ -485,21 +473,24 @@ class EM:
         return first_term + second_term
     
     def finite_diff_state_noise(self, diff):
-        func_value_1 = self.obs_log_lik()
+        func_value_1 = self.expected_complete_log_lik()
         orig = self.sigma_1
         print('orig sigma 1 {}'.format(orig))
         self.sigma_1 = 1/(1/self.sigma_1 + diff)
         print('perturbed sigma 1 {}'.format(self.sigma_1))
-        func_value_2 = self.obs_log_lik()
+        func_value_2 = self.expected_complete_log_lik()
         self.sigma_1 = orig
         return (func_value_2-func_value_1)/diff
 
     # the log lik function used by pykalman
     def pykalman_log_lik(self):
-        n = 0
-        inr_index, inr = self.find_valid_inr(n)
-        log_lik = np.zeros_like(inr)
-        for i, index in enumerate(inr_index):
-            log_lik[i] = scipy.stats.norm.logpdf(self.y[n, index], 
-                self.mu_smooth[n, index], np.sqrt(self.sigma_smooth[n, index]))
-        return np.sum(log_lik)
+        total_log_lik = 0
+        for n in range(self.num_patients):
+            inr_index, inr = self.find_valid_inr(n)
+            log_lik = np.zeros_like(inr)
+            for i, index in enumerate(inr_index):
+                log_lik[i] = scipy.stats.norm.logpdf(self.y[n, index], self.mu_pred[n, index]+self.added_effect(n, index),
+                    np.sqrt(self.sigma_pred[n, index]+self.sigma_2))
+                #log_lik[i] = scipy.stats.norm.logpdf(self.y[n, index], self.mu_smooth[n, index], np.sqrt(self.sigma_smooth[n, index]+self.sigma_2))
+            total_log_lik += np.sum(log_lik)
+        return total_log_lik
