@@ -152,7 +152,6 @@ class EM:
                 if t-1 >= j:
                     treatment_effect += np.dot(self.A[j, :], self.X[n, t-1-j, :])
         pi = treatment_effect + np.dot(self.b, self.c[n, :]) # total added effect
-        #pi = self.y[n, t] - self.mu_smooth[n, t] # this line is used for debugging 
         return pi
     
     '''E Step Calculations'''
@@ -243,7 +242,8 @@ class EM:
             inr_index, _ = self.find_valid_inr(n)
             sum_result = np.sum(np.delete(self.mu_square_smooth[n, inr_index]+np.roll(self.mu_square_smooth[n, inr_index], shift=-1), -1) \
                 - 2*self.mu_ahead_smooth[n, inr_index[:-1]])
-            result += sum_result / (inr_index.shape[0]-1)
+            if inr_index.shape[0] > 1:
+                result += sum_result / (inr_index.shape[0]-1)
         result /= self.num_patients
         self.sigma_1 = result
 
@@ -444,43 +444,6 @@ class EM:
             print('third term {}'.format(third_term))
             '''
         return log_lik
-
-    def gradient_output_noise(self):
-        n = 0
-        inr_index, inr = self.find_valid_inr(n)
-        first_term = inr_index.shape[n]/2 * self.sigma_2
-        pi = np.zeros_like(inr)
-        for i, t in enumerate(inr_index):
-            pi[i] = self.added_effect(n, t)
-        second_term = -np.sum(1/2*np.square(inr-pi)-np.multiply(inr-pi, 
-            self.mu_smooth[n, inr_index])+1/2*self.mu_square_smooth[n, inr_index]) 
-        return first_term + second_term
-
-    def finite_diff_output_noise(self, diff):
-        func_value_1 = self.expected_complete_log_lik()
-        orig = self.sigma_2
-        self.sigma_2 = 1/(1/self.sigma_2 + diff)
-        func_value_2 = self.expected_complete_log_lik()
-        self.sigma_2 = orig
-        return (func_value_2-func_value_1)/diff
-
-    def gradient_state_noise(self):
-        n = 0
-        inr_index, _ = self.find_valid_inr(n)
-        first_term = (inr_index.shape[0]-1)/2 * self.sigma_1
-        second_term = -1/2*np.sum(np.delete(self.mu_square_smooth[n, inr_index]+np.roll(self.mu_square_smooth[n, inr_index], shift=-1), -1) \
-            - 2*self.mu_ahead_smooth[n, inr_index[:-1]])
-        return first_term + second_term
-    
-    def finite_diff_state_noise(self, diff):
-        func_value_1 = self.expected_complete_log_lik()
-        orig = self.sigma_1
-        print('orig sigma 1 {}'.format(orig))
-        self.sigma_1 = 1/(1/self.sigma_1 + diff)
-        print('perturbed sigma 1 {}'.format(self.sigma_1))
-        func_value_2 = self.expected_complete_log_lik()
-        self.sigma_1 = orig
-        return (func_value_2-func_value_1)/diff
 
     # the log lik function used by pykalman
     def pykalman_log_lik(self):

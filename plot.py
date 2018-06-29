@@ -8,10 +8,9 @@ from collections import OrderedDict
 # bin_size is the size of interval used to bin the data
 # true_model indicates if we have the true data generating model
 # model is the the model generaing the data if we have it, default to None
-def plot(em, n, bin_size, true_model=False, model=None):
+def plot(em, n, time_unit, true_model=False, model=None):
     if n > 0:
         print('Patient {}'.format(n))
-    time_unit = bin_size / 60
     times = [t * time_unit for t in range(em.last_obs[n])]
     fig = plt.figure()
     if em.train_pct < 1 and em.last_train_obs[n] < em.last_obs[n]:
@@ -21,7 +20,7 @@ def plot(em, n, bin_size, true_model=False, model=None):
         upper[em.last_train_obs[n]:] = np.sqrt(em.sigma_filter[n, em.last_train_obs[n]:em.last_obs[n]] + em.sigma_2)
         lower[em.last_train_obs[n]:] = -np.sqrt(em.sigma_filter[n, em.last_train_obs[n]:em.last_obs[n]] + em.sigma_2)
         plt.fill_between(times, y+upper, y+lower, color='.8')
-        plt.plot(times, z, label = 'predicted state values')
+        #plt.plot(times, z, label = 'predicted state values')
         plt.plot(times, y, label = 'predicted observed values', color='g', linestyle='--')
     if true_model:
         plt.plot(times, model.z[n, 0:em.last_obs[n]], label = 'actual state values')
@@ -35,7 +34,7 @@ def plot(em, n, bin_size, true_model=False, model=None):
             if t >= em.last_obs[n]:
                 break
             plt.axvline(x=t * time_unit, linestyle=':', color=colors[treatment], label=treatment_types[treatment])
-    plt.plot(times[0:em.last_train_obs[n]], em.mu_filter[n, 0:em.last_train_obs[n]], label='filtered values')
+    #plt.plot(times[0:em.last_train_obs[n]], em.mu_filter[n, 0:em.last_train_obs[n]], label='filtered values')
     plt.xlabel('time (hrs)')
     plt.ylabel('INR')
     plt.title('Model Results')
