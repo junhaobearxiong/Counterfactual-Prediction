@@ -22,26 +22,32 @@ class EM:
     '''
     Parameter list:
     y: observations, shape: [number of patients * number of time points]
-    X: treatments, shape: [number of patients * number of time points * number of types of treatments]
+    X: treatments after the first observation
+        shape: [number of patients * number of time points * number of types of treatments]
     c: static conditions (chronics and demographics), shape: [number of patients * number of types of static conditions]
     J: number of past treatments to consider
     K: number of interaction effects to model (NOT implemented yet)
     train_pct: percentage of EACH observation time series to use for training
+    X_prev: treatments prior to the first observation
+        shape: [number of patients * number of past effects * number of time points]
+        the time point is in increasing order
     single_effect: whether to consider only the effect of one treatment in the past
     init_A_mean: the initial mean of coefficients in A
     init_b_mean: the initial mean of coefficients in b
     '''
-    def __init__(self, y, X, c, J, K, train_pct, single_effect=False, init_A_mean=.1, init_b_mean=-.1):
+    def __init__(self, y, X, c, J, K, train_pct, X_prev_given=False, X_prev=None, single_effect=False, init_A_mean=.1, init_b_mean=-.1):
         # Store inputs
         self.num_patients = np.shape(y)[0] 
         self.T = np.shape(y)[1] # length of the observed sequence
         self.y = y # observation matrix
-        self.X = X # treatment matrix
+        self.X = X # treatment matrix for treatments after (inclusive) the first observation
+        self.X_prev = X_prev # treatment matrix for treatments before the first observation
         self.c = c # chronic conditions
         self.K = K  # number of interaction terms modeled
         self.J = J # number of past treatment effects to be considered
         self.single_effect = single_effect # if true only consider the Jth treatment prior to the current time point
 
+        self.X_prev_given = X_prev_given
         self.train_pct = train_pct # percentage of each time series used for training
         # time of last observations for each patients plus one
         # plus one because last_obs and last_train_obs effectively
@@ -146,11 +152,16 @@ class EM:
     def added_effect(self, n, t):
         treatment_effect = 0
         if self.single_effect:
-            treatment_effect = np.dot(self.A, self.X[n, t-self.J, :])
+            if t >= self.J:
+                treatment_effect = np.dot(self.A, self.X[n, t-self.J, :])
+            elif self.X_prev_given:
+                treatment_effect = np.dot(self.A, self.X_prev[n, -self.J, :])
         else:
             for j in range(self.J):
-                if t-1 >= j:
-                    treatment_effect += np.dot(self.A[j, :], self.X[n, t-1-j, :])
+                if t >= j+1:
+                    treatment_effect += np.dot(self.A[j, :], self.X[n, t-(j+1), :])
+                elif self.X_prev_given:
+                    treatment_effect += np.dot(self.A[j, :], self.X_prev[n, -(j+1), :])
         pi = treatment_effect + np.dot(self.b, self.c[n, :]) # total added effect
         return pi
     
@@ -297,7 +308,9 @@ class EM:
                     for i, t in enumerate(inr_index):
                         extra[i] = self.added_effect(n, t)
                         if t >= j+1:
-                            x_t[i] = self.X[n, t-j-1, treatment]
+                            x_t[i] = self.X[n, t-(j+1), treatment]
+                        elif self.X_prev_given:
+                            x_t[i] = self.X_prev[n, -(j+1), treatment]
                         extra[i] -= self.A[j, treatment] * x_t[i]
                     result += np.sum(np.multiply(inr-self.mu_smooth[n, inr_index]-extra, x_t))
                     divisor += np.sum(np.square(x_t))
