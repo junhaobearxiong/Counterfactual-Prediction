@@ -250,11 +250,10 @@ class EM:
                     sum_result += self.mu_square_smooth[n, t+1]-2*self.mu_ahead_smooth[n, t]+self.mu_square_smooth[n, t]
                 result += sum_result / (self.last_train_obs[n]-1) 
             '''
-            inr_index, _ = self.find_valid_inr(n)
-            sum_result = np.sum(np.delete(self.mu_square_smooth[n, inr_index]+np.roll(self.mu_square_smooth[n, inr_index], shift=-1), -1) \
-                - 2*self.mu_ahead_smooth[n, inr_index[:-1]])
-            if inr_index.shape[0] > 1:
-                result += sum_result / (inr_index.shape[0]-1)
+            sum_result = np.sum(np.delete(self.mu_square_smooth[n, :self.last_train_obs[n]]
+                +np.roll(self.mu_square_smooth[n, :self.last_train_obs[n]], shift=-1), -1) \
+                - 2*self.mu_ahead_smooth[n, :self.last_train_obs[n]-1])
+            result += sum_result / (self.last_train_obs[n]-1)
         result /= self.num_patients
         self.sigma_1 = result
 
@@ -360,11 +359,11 @@ class EM:
         self.sigma_2 = result
         
     def M_step(self):
-        self.init_z_mle()
-        self.sigma_0_mle()
+        #self.init_z_mle()
+        #self.sigma_0_mle()
         self.sigma_1_mle()
-        self.A_mle()
-        self.b_mle()
+        #self.A_mle()
+        #self.b_mle()
         self.sigma_2_mle()
         
     '''Run EM for fixed iterations or until paramters converge'''
@@ -374,11 +373,14 @@ class EM:
             self.E_step()
             self.M_step()
             new_ll = self.pykalman_log_lik()
+            if self.sigma_1 < 0:
+                print('break after M step in iteration {}'.format(i))
+                return i+1
             #print('observed log likelihood {}'.format(new_ll))
-            self.obs_log_lik.append(new_ll)
+            self.obs_log_lik.append(new_ll)            
             if np.abs(new_ll - old_ll) < tol:
                 print('{} iterations before convergence'.format(i+1))
-                return i
+                return i+1
             old_ll = new_ll
             #print('mse {}'.format(self.get_MSE()))
         print('max iterations: {} reached'.format(max_num_iter))
@@ -461,6 +463,9 @@ class EM:
     # the log lik function used by pykalman
     def pykalman_log_lik(self):
         total_log_lik = 0
+        # the prediction mean and variance using the current (not previous) parameters
+        # since kalman filter is run afresh every em iteration, this doesn't affect em outputs
+        self.forward()
         for n in range(self.num_patients):
             inr_index, inr = self.find_valid_inr(n)
             log_lik = np.zeros_like(inr)
