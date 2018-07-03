@@ -9,6 +9,7 @@ import math
 import random
 import matplotlib.pyplot as plt
 import pickle
+import time
 
 '''
 EM object can perform the following:
@@ -32,10 +33,11 @@ class EM:
         shape: [number of patients * number of past effects * number of time points]
         the time point is in increasing order
     single_effect: whether to consider only the effect of one treatment in the past
-    init_A_mean: the initial mean of coefficients in A
-    init_b_mean: the initial mean of coefficients in b
+    init_A: the initial mean of coefficients in A
+    init_b: the initial mean of coefficients in b
     '''
-    def __init__(self, y, X, c, J, K, train_pct, X_prev_given=False, X_prev=None, single_effect=False, init_A_mean=.1, init_b_mean=-.1):
+    def __init__(self, y, X, c, J, K, train_pct, X_prev_given=False, X_prev=None, single_effect=False, 
+        init_given=False, init_A=None, init_b=None):
         # Store inputs
         self.num_patients = np.shape(y)[0] 
         self.T = np.shape(y)[1] # length of the observed sequence
@@ -62,17 +64,20 @@ class EM:
         self.Q = np.zeros((self.num_patients, self.T, self.K)) # interaction term
         
         # Model Parameters to be estimated
-        if self.single_effect:
-            self.A = np.full(self.N, init_A_mean) + np.random.randn(self.N)*0.01
+        if init_given:
+            self.A = init_A + np.random.randn(init_A.shape[0], init_A.shape[1])
+            self.b = init_b + np.random.randn(init_b.shape[0])
         else:
-            #self.A = np.zeros((self.J, self.N)) 
-            self.A = np.full((self.J, self.N), init_A_mean) + np.random.randn(self.J, self.N)*0.01 # coefficients a_j's
-        #self.b = np.zeros(self.M)
-        self.b = np.full(self.M, init_b_mean) + np.random.randn(self.M)*0.01
+            if self.single_effect:
+                self.A = np.zeros(self.N) + np.random.randn(self.N)*0.01
+            else:
+                self.A = np.zeros((self.J, self.N)) + np.random.randn(self.J, self.N)*0.01 # coefficients a_j's
+            self.b = np.zeros(self.M) + + np.random.randn(self.M)*0.01
+
         self.d = np.zeros(self.K)
-        self.sigma_0 = np.abs(np.random.randn()*0.1) # initial state variance
+        self.sigma_0 = np.abs(np.random.randn()*.1) # initial state variance
         self.sigma_1 = np.abs(np.random.randn())
-        self.sigma_2 = np.abs(np.random.randn()*0.1)
+        self.sigma_2 = np.abs(np.random.randn()*.01)
         self.init_z = np.random.normal(0, np.sqrt(self.sigma_0), size = 1)# np.random.uniform(0, 10, size = 1) # initial state mean
         
         self.init_0 = self.sigma_0
@@ -250,10 +255,11 @@ class EM:
                     sum_result += self.mu_square_smooth[n, t+1]-2*self.mu_ahead_smooth[n, t]+self.mu_square_smooth[n, t]
                 result += sum_result / (self.last_train_obs[n]-1) 
             '''
-            sum_result = np.sum(np.delete(self.mu_square_smooth[n, :self.last_train_obs[n]]
-                +np.roll(self.mu_square_smooth[n, :self.last_train_obs[n]], shift=-1), -1) \
-                - 2*self.mu_ahead_smooth[n, :self.last_train_obs[n]-1])
-            result += sum_result / (self.last_train_obs[n]-1)
+            if self.last_train_obs[n] > 1:
+                sum_result = np.sum(np.delete(self.mu_square_smooth[n, :self.last_train_obs[n]]
+                    +np.roll(self.mu_square_smooth[n, :self.last_train_obs[n]], shift=-1), -1) \
+                    - 2*self.mu_ahead_smooth[n, :self.last_train_obs[n]-1])
+                result += sum_result / (self.last_train_obs[n]-1)
         result /= self.num_patients
         self.sigma_1 = result
 
@@ -359,24 +365,30 @@ class EM:
         self.sigma_2 = result
         
     def M_step(self):
-        #self.init_z_mle()
-        #self.sigma_0_mle()
+        self.init_z_mle()
+        self.sigma_0_mle()
         self.sigma_1_mle()
         #self.A_mle()
         #self.b_mle()
         self.sigma_2_mle()
         
     '''Run EM for fixed iterations or until paramters converge'''
-    def run_EM(self, max_num_iter, tol=.0001):
+    def run_EM(self, max_num_iter, tol=.001):
         old_ll = -np.inf
         for i in range(max_num_iter):
+            #print('iteration {}'.format(i+1))
+            #t0 = time.time()
             self.E_step()
+            #t1 = time.time()
             self.M_step()
+            #t2 = time.time()
             new_ll = self.pykalman_log_lik()
-            if self.sigma_1 < 0:
-                print('break after M step in iteration {}'.format(i))
-                return i+1
-            #print('observed log likelihood {}'.format(new_ll))
+            #t3 = time.time()
+            '''
+            print('E step took {}'.format(t1-t0))
+            print('M step took {}'.format(t2-t1))
+            print('calculating loglik took {}'.format(t3-t2))
+            '''
             self.obs_log_lik.append(new_ll)            
             if np.abs(new_ll - old_ll) < tol:
                 print('{} iterations before convergence'.format(i+1))
@@ -438,26 +450,16 @@ class EM:
         for n in range(self.num_patients):
             inr_index = np.where(np.invert(np.isnan(self.y[n, :self.last_train_obs[n]])))[0]
             inr = self.y[n, inr_index]
-            log_sigma_1 = -(inr_index.shape[0]-1)/2*np.log(self.sigma_1) #-(self.last_train_obs[n]-1)/2*np.log(self.sigma_1)
+            log_sigma_1 = -(self.last_train_obs[n]-1)/2*np.log(self.sigma_1)
             log_sigma_2 = -inr_index.shape[0]/2*np.log(self.sigma_2)
             first_term = -1/(2*self.sigma_0)*(self.mu_square_smooth[n, 0]-2*self.init_z*self.mu_smooth[n, 0]+np.square(self.init_z))
-            '''
             second_term = -1/(2*self.sigma_1)*np.sum(np.delete(self.mu_square_smooth[n, :self.last_train_obs[n]]+np.roll(self.mu_square_smooth[n, :self.last_train_obs[n]], shift=-1), -1) \
                 - 2*self.mu_ahead_smooth[n, :self.last_train_obs[n]-1])
-            '''
-            second_term = -1/(2*self.sigma_1)*np.sum(np.delete(self.mu_square_smooth[n, inr_index]+np.roll(self.mu_square_smooth[n, inr_index], shift=-1), -1) \
-                - 2*self.mu_ahead_smooth[n, inr_index[:-1]])
             pi = np.zeros_like(inr)
             for i, t in enumerate(inr_index):
                 pi[i] = self.added_effect(n, t)
             third_term = -1/(2*self.sigma_2)*np.sum(np.square(inr-pi)-2*np.multiply(inr-pi, self.mu_smooth[n, inr_index])+self.mu_square_smooth[n, inr_index]) 
             log_lik += log_sigma_1 + log_sigma_2 + first_term + second_term + third_term
-            '''
-            print('log sigma 1 {}'.format(log_sigma_1))
-            print('log sigma 2 {}'.format(log_sigma_2))
-            print('second term {}'.format(second_term))
-            print('third term {}'.format(third_term))
-            '''
         return log_lik
 
     # the log lik function used by pykalman
