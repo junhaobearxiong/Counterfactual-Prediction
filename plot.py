@@ -8,7 +8,7 @@ from collections import OrderedDict
 # bin_size is the size of interval used to bin the data
 # true_model indicates if we have the true data generating model
 # model is the the model generaing the data if we have it, default to None
-def plot(em, n, time_unit, true_model=False, model=None):
+def plot(em, n, time_unit, signal_name, treatment_types, true_model=False, model=None):
     if n > 0:
         print('Patient {}'.format(n))
     times = [t * time_unit for t in range(em.last_obs[n])]
@@ -27,8 +27,7 @@ def plot(em, n, time_unit, true_model=False, model=None):
         plt.plot(times, em.mu_smooth[n, 0:em.last_obs[n]], color='m', label = 'predicted state values')
     plt.plot(times[0:em.last_train_obs[n]], em.y[n, 0:em.last_train_obs[n]], '.', label = 'actual observed values (for training)', color='b')
     plt.plot(times[em.last_train_obs[n]:em.last_obs[n]], em.y[n, em.last_train_obs[n]:em.last_obs[n]], '.', label = 'actual observed values (for testing)', color='r')
-    colors = ['b', 'y', 'c', 'r', 'm']
-    treatment_types = ['nsaid', 'transfusion_plasma', 'transfusion_platelet', 'anticoagulant', 'aspirin']
+    colors = ['b', 'y', 'c', 'r', 'm', 'k']
     for treatment in range(em.N):
         for t in np.nonzero(em.X[n, :, treatment])[0]:
             if t >= em.last_obs[n]:
@@ -36,8 +35,8 @@ def plot(em, n, time_unit, true_model=False, model=None):
             plt.axvline(x=t * time_unit, linestyle=':', color=colors[treatment], label=treatment_types[treatment])
     #plt.plot(times[0:em.last_train_obs[n]], em.mu_filter[n, 0:em.last_train_obs[n]], label='filtered values')
     plt.xlabel('time (hrs)')
-    plt.ylabel('INR')
-    plt.title('Model Results')
+    plt.ylabel(signal_name)
+    plt.title('Model Prediction')
     # To avoid duplicated labels when ploting verticle lines for treatments
     handles, labels = plt.gca().get_legend_handles_labels()
     by_label = OrderedDict(zip(labels, handles))

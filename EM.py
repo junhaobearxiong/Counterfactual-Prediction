@@ -368,15 +368,16 @@ class EM:
         self.init_z_mle()
         self.sigma_0_mle()
         self.sigma_1_mle()
-        #self.A_mle()
-        #self.b_mle()
+        self.A_mle()
+        self.b_mle()
         self.sigma_2_mle()
         
     '''Run EM for fixed iterations or until paramters converge'''
     def run_EM(self, max_num_iter, tol=.001):
         old_ll = -np.inf
+        old_params = np.full(self.J*self.N+self.M+3, np.inf)
         for i in range(max_num_iter):
-            #print('iteration {}'.format(i+1))
+            print('iteration {}'.format(i+1))
             #t0 = time.time()
             self.E_step()
             #t1 = time.time()
@@ -389,11 +390,19 @@ class EM:
             print('M step took {}'.format(t2-t1))
             print('calculating loglik took {}'.format(t3-t2))
             '''
-            self.obs_log_lik.append(new_ll)            
+            self.obs_log_lik.append(new_ll)
+    
             if np.abs(new_ll - old_ll) < tol:
-                print('{} iterations before convergence'.format(i+1))
+                print('{} iterations before loglik converges'.format(i+1))
                 return i+1
             old_ll = new_ll
+
+            new_params = np.concatenate([self.A.flatten(), self.b, np.array([self.sigma_0, self.sigma_1, self.sigma_2])])
+            if np.max(np.absolute(new_params-old_params))<tol:
+                print('{} iterations before params converge'.format(i+1))
+                return i+1
+            old_params = new_params  
+
             #print('mse {}'.format(self.get_MSE()))
         print('max iterations: {} reached'.format(max_num_iter))
         return max_num_iter
