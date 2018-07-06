@@ -134,6 +134,7 @@ class EM:
         # used to debug
         self.expected_log_lik = []
         self.obs_log_lik = []
+        self.mse = []
     
 
     # find the last non-nan y value for training for each patient
@@ -403,7 +404,9 @@ class EM:
                 return i+1
             old_params = new_params  
 
-            #print('mse {}'.format(self.get_MSE()))
+            self.mse.append(self.get_MSE())
+            self.expected_log_lik.append(self.expected_complete_log_lik())
+
         print('max iterations: {} reached'.format(max_num_iter))
         return max_num_iter
 
