@@ -381,8 +381,11 @@ class EM:
             print('iteration {}'.format(i+1))
             #t0 = time.time()
             self.E_step()
+            #print('E step {}'.format(self.expected_complete_log_lik()))
             #t1 = time.time()
             self.M_step()
+            #print('M step {}'.format(self.expected_complete_log_lik()))
+            self.expected_log_lik.append(self.expected_complete_log_lik())
             #t2 = time.time()
             new_ll = self.pykalman_log_lik()
             #t3 = time.time()
@@ -405,7 +408,6 @@ class EM:
             old_params = new_params  
 
             self.mse.append(self.get_MSE())
-            self.expected_log_lik.append(self.expected_complete_log_lik())
 
         print('max iterations: {} reached'.format(max_num_iter))
         return max_num_iter
