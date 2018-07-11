@@ -72,7 +72,7 @@ class EM:
                 self.A = np.zeros(self.N) + np.random.randn(self.N)*0.01
             else:
                 self.A = np.zeros((self.J, self.N)) + np.random.randn(self.J, self.N)*0.01 # coefficients a_j's
-            self.b = np.zeros(self.M) + + np.random.randn(self.M)*0.01
+            self.b = np.zeros(self.M) + np.random.randn(self.M)*0.01
 
         self.d = np.zeros(self.K)
         self.sigma_0 = np.abs(np.random.randn()*.1) # initial state variance
@@ -83,40 +83,7 @@ class EM:
         self.init_0 = self.sigma_0
         self.init_1 = self.sigma_1
         self.init_2 = self.sigma_2
-        self.init_state = self.init_z
-
-        '''
-        self.A = np.array([[-.9, -.8], [-.5, -.3]]) # the coefficients a_j's stored in a matrix
-        self.b = np.array([.6, .4])
-        '''
-
-        # create coefficient matrix used to learn the coefficients
-        '''
-        Not used in the current version
-        mtx = []
-        for n in range(self.num_patients):
-            columns = []
-            if self.single_effect:
-                self.params = np.zeros(self.N + self.M + self.K)
-                col = np.roll(self.X[n, :, :], shift=self.J, axis=0)
-                col[[i for i in range(0, self.J)], :] = 0
-                columns.append(col)
-            else:
-                self.params = np.zeros(self.N*self.J + self.M + self.K)
-                for j in range(1, self.J+1):
-                    col = np.roll(self.X[n, :, :], shift=j, axis=0)
-                    col[[i for i in range(0, j)], :] = 0
-                    columns.append(col)
-            C = np.stack([self.c[n, :] for i in range(self.T)], axis = 0)
-            columns.append(C)
-            coeff_mtx = np.concatenate(columns, axis = 1)
-            # get rid of nans
-            coeff_mtx = coeff_mtx[:self.last_train_obs[n], :]
-            nans = np.where(np.isnan(self.y[n, :self.last_train_obs[n]]))[0]
-            coeff_mtx = np.delete(coeff_mtx, nans, axis = 0)
-            mtx.append(coeff_mtx)
-        self.coeff_mtx = np.concatenate(mtx, axis = 0)        
-        '''
+        self.init_state = self.init_z        
 
         # Intermediate values to stored for Kalman filter and smoother computations
         self.mu_filter = np.zeros((self.num_patients, self.T)) # mu_t|t
@@ -248,20 +215,17 @@ class EM:
         
     def sigma_1_mle(self):
         result = 0
+        num_sum = 0
         for n in range(self.num_patients):
-            '''
-            sum_result = 0
-            if self.last_train_obs[n] > 1:
-                for t in range(self.last_train_obs[n]-1):
-                    sum_result += self.mu_square_smooth[n, t+1]-2*self.mu_ahead_smooth[n, t]+self.mu_square_smooth[n, t]
-                result += sum_result / (self.last_train_obs[n]-1) 
-            '''
+            # if a patient only has one observation, the transition term doesn't appear in its likelihood
+            # so when calculating sigma 1, we should only include those who have more than one observations
             if self.last_train_obs[n] > 1:
                 sum_result = np.sum(np.delete(self.mu_square_smooth[n, :self.last_train_obs[n]]
                     +np.roll(self.mu_square_smooth[n, :self.last_train_obs[n]], shift=-1), -1) \
                     - 2*self.mu_ahead_smooth[n, :self.last_train_obs[n]-1])
                 result += sum_result / (self.last_train_obs[n]-1)
-        result /= self.num_patients
+                num_sum += 1
+        result /= num_sum
         self.sigma_1 = result
 
     def init_z_mle(self):
@@ -270,30 +234,6 @@ class EM:
             result += self.mu_smooth[n, 0]
         result /= self.num_patients
         self.init_z = result
-    
-    # M step updates for pi_t is pi_t = y_t - E[z_t] for all t
-    # to recover the coefficients A and b in pi_t, we use linear least square
-    # to solve a system of linear equations 
-    '''
-    Not used in the current version
-    def pi_mle(self):
-        rhs_list = []
-        for n in range(self.num_patients):
-            rhs = np.subtract(self.y[n, :self.last_train_obs[n]], self.mu_smooth[n, :self.last_train_obs[n]])
-            rhs = np.delete(rhs, np.where(np.isnan(rhs))[0])
-            rhs_list.append(rhs)
-        # rhs: y_t - E[z_t]
-        rhs_concat = np.concatenate(rhs_list, axis = 0)
-        params = np.linalg.lstsq(self.coeff_mtx, rhs_concat, rcond=None)[0] # params as a long vector
-        if self.single_effect:
-            self.A = np.array(params[0:self.N])
-            self.b = np.array(params[self.N:self.N+self.M])
-        else:
-            self.A = np.reshape(params[0:self.N*self.J], (self.J, self.N))
-            self.b = np.array(params[self.N*self.J:self.N*self.J+self.M])
-            self.d = np.array(params[self.N*self.J+self.M:])
-        self.params = params
-    '''
     
     # helper function to find the index of valid (not nan) inr measurement for 
     # patient n, return the indices and the corresponding inr values
@@ -347,15 +287,6 @@ class EM:
     def sigma_2_mle(self):
         result = 0
         for n in range(self.num_patients):
-            '''
-            sum_result = 0
-            num_sum = 0
-            for t in range(self.last_train_obs[n]):
-                if not np.isnan(self.y[n, t]):
-                    sum_result += np.square(self.y[n, t]-self.added_effect(n, t))-2*(self.y[n, t]-self.added_effect(n, t)) \
-                        *self.mu_smooth[n, t] + self.mu_square_smooth[n, t]
-                    num_sum += 1
-            '''
             inr_index, inr = self.find_valid_inr(n)
             pi = np.zeros_like(inr)
             for i, t in enumerate(inr_index):
@@ -385,7 +316,7 @@ class EM:
             #t1 = time.time()
             self.M_step()
             #print('M step {}'.format(self.expected_complete_log_lik()))
-            self.expected_log_lik.append(self.expected_complete_log_lik())
+            #self.expected_log_lik.append(self.expected_complete_log_lik())
             #t2 = time.time()
             new_ll = self.pykalman_log_lik()
             #t3 = time.time()
