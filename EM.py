@@ -17,7 +17,7 @@ EM object can perform the following:
 2. Predict ahead based on the learned parameters
 3. Calculate prediction MSE
 
-Derivation of the EM update and the corresponding notations are in Ghahramani 1996
+Derivation of the EM updates and the corresponding notations are in Ghahramani 1996
 '''
 class EM:
     '''
@@ -30,8 +30,9 @@ class EM:
     K: number of interaction effects to model (NOT implemented yet)
     train_pct: percentage of EACH observation time series to use for training
     X_prev: treatments prior to the first observation
-        shape: [number of patients * number of past effects * number of time points]
-        the time point is in increasing order
+        shape: [number of patients * number of past effects * number of types of treatments]
+        smaller index in number of past effects corresponds to earlier time point
+        so the last index has treatment that is closest to time zero
     single_effect: whether to consider only the effect of one treatment in the past
     init_A: the initial mean of coefficients in A
     init_b: the initial mean of coefficients in b
@@ -105,6 +106,8 @@ class EM:
     
 
     # find the last non-nan y value for training for each patient
+    # this is necessary since the time series of each patient has different length
+    # they are stored in one 2d array, so there would be nans after the last observation for each patient
     # return an array with the length num_patients
     def find_last_obs(self):
         last_non_nan = np.zeros(self.y.shape[0], dtype=int)
@@ -206,13 +209,15 @@ class EM:
         self.calc_mu_ahead_smooth()
     
     '''M Step Calculations'''
+    # M step updates for the initial state variance
     def sigma_0_mle(self):
         result = 0
         for n in range(self.num_patients):
             result += self.mu_square_smooth[n, 0] - np.square(self.mu_smooth[n, 0])
         result /= self.num_patients
         self.sigma_0 = result
-        
+
+    # M step updates for the transition variance
     def sigma_1_mle(self):
         result = 0
         num_sum = 0
@@ -228,6 +233,7 @@ class EM:
         result /= num_sum
         self.sigma_1 = result
 
+    # M step update for the initial state mean
     def init_z_mle(self):
         result = 0
         for n in range(self.num_patients):
@@ -242,6 +248,8 @@ class EM:
         inr = self.y[n, inr_index]
         return (inr_index, inr)
 
+    # mle updates for the coefficients in A
+    # derived by setting gradient wrt the coefficients to zero
     def A_mle(self):
         for j in range(self.J):
             for treatment in range(self.N):
@@ -267,6 +275,8 @@ class EM:
                 else:
                     self.A[j, treatment] = result / divisor
 
+    # mle updates for the coefficients in b
+    # derived similarly as A_mle
     def b_mle(self):
         for m in range(self.M):
             result = 0
@@ -284,6 +294,7 @@ class EM:
             else:
                 self.b[m] = result / divisor
 
+    # M step updates for the observation variance
     def sigma_2_mle(self):
         result = 0
         for n in range(self.num_patients):
@@ -332,6 +343,7 @@ class EM:
                 return i+1
             old_ll = new_ll
 
+            # for faster training convergence, stop iterations when parameters stop changing
             new_params = np.concatenate([self.A.flatten(), self.b, np.array([self.sigma_0, self.sigma_1, self.sigma_2])])
             if np.max(np.absolute(new_params-old_params))<tol:
                 print('{} iterations before params converge'.format(i+1))
@@ -343,19 +355,21 @@ class EM:
         print('max iterations: {} reached'.format(max_num_iter))
         return max_num_iter
 
+    # transition function used in prediction 
     def transition(self, prev, n, t):
         noise = self.sigma_filter[n, t-1] + self.sigma_1
         self.sigma_filter[n, t] = noise
         z = prev #np.random.normal(prev, np.sqrt(noise), 1)
         return z
 
+    # emission function used in prediction
     def emission(self, z, n, t):
         mean = z + self.added_effect(n, t)
         y = mean #np.random.normal(mean, np.sqrt(self.sigma_2), 1)
         return y
     
     # given parameters and a sequence latent states up to the last training observation
-    # predict the latent state (z) and observation (y) up to the last observation
+    # predict the latent state (z) and observation (y) up to the last observation for a particular patient (n)
     def predict(self, n):
         y = np.zeros(self.last_obs[n])
         z = np.zeros(self.last_obs[n])
@@ -385,9 +399,25 @@ class EM:
         else:
             return 0
 
-    # calculate the observed data (training) log likelihood 
-    # each sum is up to the last training observation, so different for each patient
-    # the sum in the third term only considers time where observation is not missing
+    # the log lik function used by pykalman
+    # used to check for log likelihood convergence
+    def pykalman_log_lik(self):
+        total_log_lik = 0
+        # the prediction mean and variance using the current (not previous) parameters
+        # since kalman filter is run afresh every em iteration, this doesn't affect em outputs
+        self.forward()
+        for n in range(self.num_patients):
+            inr_index, inr = self.find_valid_inr(n)
+            log_lik = np.zeros_like(inr)
+            for i, index in enumerate(inr_index):
+                log_lik[i] = scipy.stats.norm.logpdf(self.y[n, index], self.mu_pred[n, index]+self.added_effect(n, index),
+                    np.sqrt(self.sigma_pred[n, index]+self.sigma_2))
+                #log_lik[i] = scipy.stats.norm.logpdf(self.y[n, index], self.mu_smooth[n, index], np.sqrt(self.sigma_smooth[n, index]+self.sigma_2))
+            total_log_lik += np.sum(log_lik)
+        return total_log_lik
+
+    # calculate the expected complete data log likelihood 
+    # used for testing
     def expected_complete_log_lik(self):
         log_lik = 0
         log_sigma_0 = -self.num_patients * np.log(self.sigma_0)/2
@@ -406,19 +436,3 @@ class EM:
             third_term = -1/(2*self.sigma_2)*np.sum(np.square(inr-pi)-2*np.multiply(inr-pi, self.mu_smooth[n, inr_index])+self.mu_square_smooth[n, inr_index]) 
             log_lik += log_sigma_1 + log_sigma_2 + first_term + second_term + third_term
         return log_lik
-
-    # the log lik function used by pykalman
-    def pykalman_log_lik(self):
-        total_log_lik = 0
-        # the prediction mean and variance using the current (not previous) parameters
-        # since kalman filter is run afresh every em iteration, this doesn't affect em outputs
-        self.forward()
-        for n in range(self.num_patients):
-            inr_index, inr = self.find_valid_inr(n)
-            log_lik = np.zeros_like(inr)
-            for i, index in enumerate(inr_index):
-                log_lik[i] = scipy.stats.norm.logpdf(self.y[n, index], self.mu_pred[n, index]+self.added_effect(n, index),
-                    np.sqrt(self.sigma_pred[n, index]+self.sigma_2))
-                #log_lik[i] = scipy.stats.norm.logpdf(self.y[n, index], self.mu_smooth[n, index], np.sqrt(self.sigma_smooth[n, index]+self.sigma_2))
-            total_log_lik += np.sum(log_lik)
-        return total_log_lik
