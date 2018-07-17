@@ -104,7 +104,6 @@ class EM:
         self.obs_log_lik = []
         self.mse = []
     
-
     # find the last non-nan y value for training for each patient
     # this is necessary since the time series of each patient has different length
     # they are stored in one 2d array, so there would be nans after the last observation for each patient
@@ -348,7 +347,7 @@ class EM:
             if np.max(np.absolute(new_params-old_params))<tol:
                 print('{} iterations before params converge'.format(i+1))
                 return i+1
-            old_params = new_params  
+            old_params = new_params
 
             self.mse.append(self.get_MSE())
 
@@ -384,16 +383,19 @@ class EM:
 
     # get prediction mean square error 
     def get_MSE(self):
+        self.sos = []
         sum_of_square = 0
         count = 0
         for n in range(self.num_patients):
             if self.last_train_obs[n] < self.last_obs[n]:
                 y_true = self.y[n, self.last_train_obs[n]:self.last_obs[n]]
                 y_pred = self.predict(n)[1][self.last_train_obs[n]:self.last_obs[n]]
-                y_true = y_true[np.where(np.invert(np.isnan(y_true)))[0]]
-                y_pred = y_pred[np.where(np.invert(np.isnan(y_true)))[0]]
-                sum_of_square += np.sum(np.square(np.subtract(y_pred, y_true))) / y_pred.shape[0]
+                valid_index = np.where(np.invert(np.isnan(y_true)))[0]
+                y_true_valid = y_true[valid_index]
+                y_pred_valid = y_pred[valid_index]
+                sum_of_square += np.sum(np.square(np.subtract(y_pred_valid, y_true_valid))) / y_pred_valid.shape[0]
                 count += 1
+                self.sos.append(np.sum(np.square(np.subtract(y_pred_valid, y_true_valid))) / y_pred_valid.shape[0])
         if count > 0:
             return sum_of_square / count
         else:

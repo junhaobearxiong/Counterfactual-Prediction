@@ -26,7 +26,7 @@ def plot(em, n, time_unit, signal_name, treatment_types, true_model=False, model
         plt.plot(times, model.z[n, 0:em.last_obs[n]], label = 'actual state values')
     plt.plot(times[0:em.last_train_obs[n]], em.y[n, 0:em.last_train_obs[n]], '.', label = 'actual observed values (for training)', color='b')
     plt.plot(times[em.last_train_obs[n]:em.last_obs[n]], em.y[n, em.last_train_obs[n]:em.last_obs[n]], '.', label = 'actual observed values (for testing)', color='r')
-    colors = ['b', 'y', 'c', 'r', 'm', 'k']
+    colors = ['b', 'tab:orange', 'm', 'tab:brown', 'k', 'r']
     for treatment in range(em.N):
         for t in np.nonzero(em.X[n, :, treatment])[0]:
             if t >= em.last_obs[n]:
