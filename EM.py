@@ -103,6 +103,7 @@ class EM:
         self.expected_log_lik = []
         self.obs_log_lik = []
         self.mse = []
+        self.params = {}
     
     # find the last non-nan y value for training for each patient
     # this is necessary since the time series of each patient has different length
@@ -317,7 +318,7 @@ class EM:
     '''Run EM for fixed iterations or until paramters converge'''
     def run_EM(self, max_num_iter, tol=.001):
         old_ll = -np.inf
-        old_params = np.full(self.J*self.N+self.M+3, np.inf)
+        old_params = np.full(self.J*self.N+self.M+4, np.inf)
         for i in range(max_num_iter):
             print('iteration {}'.format(i+1))
             #t0 = time.time()
@@ -343,12 +344,19 @@ class EM:
             old_ll = new_ll
 
             # for faster training convergence, stop iterations when parameters stop changing
-            new_params = np.concatenate([self.A.flatten(), self.b, np.array([self.sigma_0, self.sigma_1, self.sigma_2])])
+            new_params = np.concatenate([self.A.flatten(), self.b, np.array([self.init_z, self.sigma_0, self.sigma_1, self.sigma_2])])
             if np.max(np.absolute(new_params-old_params))<tol:
                 print('{} iterations before params converge'.format(i+1))
                 return i+1
             old_params = new_params
-
+            
+            # keep a list of values of each param for each iteration to debug mse 
+            if i == 0:
+                for j in range(len(new_params)):
+                    self.params[j] = []
+            for j, param in enumerate(new_params):
+                self.params[j].append(param)
+            
             self.mse.append(self.get_MSE())
 
         print('max iterations: {} reached'.format(max_num_iter))
