@@ -213,7 +213,10 @@ class EM:
     def sigma_0_mle(self):
         result = 0
         for n in range(self.num_patients):
-            result += self.mu_square_smooth[n, 0] - np.square(self.mu_smooth[n, 0])
+            # written in this form instead of subbing in the M step updates for init_z
+            # because for the population parameter init_z is not going to be the same as each patient's 
+            # first smoothened state
+            result += self.mu_square_smooth[n, 0] -2*self.mu_smooth[n, 0]*self.init_z + np.square(self.init_z)
         result /= self.num_patients
         self.sigma_0 = result
 
