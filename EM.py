@@ -348,9 +348,11 @@ class EM:
 
             # for faster training convergence, stop iterations when parameters stop changing
             new_params = np.concatenate([self.A.flatten(), self.b, np.array([self.init_z, self.sigma_0, self.sigma_1, self.sigma_2])])
+            '''
             if np.max(np.absolute(new_params-old_params))<tol:
                 print('{} iterations before params converge'.format(i+1))
                 return i+1
+            '''
             old_params = new_params
             
             # keep a list of values of each param for each iteration to debug mse 
