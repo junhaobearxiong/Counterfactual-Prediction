@@ -222,19 +222,29 @@ class EM:
 
     # M step updates for the transition variance
     def sigma_1_mle(self):
+        '''
         result = 0
         num_sum = 0
+        '''
+        numerator = 0
+        denominator = 0
         for n in range(self.num_patients):
             # if a patient only has one observation, the transition term doesn't appear in its likelihood
             # so when calculating sigma 1, we should only include those who have more than one observations
             if self.last_train_obs[n] > 1:
+                '''
                 sum_result = np.sum(np.delete(self.mu_square_smooth[n, :self.last_train_obs[n]]
                     +np.roll(self.mu_square_smooth[n, :self.last_train_obs[n]], shift=-1), -1) \
                     - 2*self.mu_ahead_smooth[n, :self.last_train_obs[n]-1])
                 result += sum_result / (self.last_train_obs[n]-1)
                 num_sum += 1
-        result /= num_sum
-        self.sigma_1 = result
+                '''
+        #result /= num_sum
+                numerator += np.sum(np.delete(self.mu_square_smooth[n, :self.last_train_obs[n]]
+                    +np.roll(self.mu_square_smooth[n, :self.last_train_obs[n]], shift=-1), -1) \
+                    - 2*self.mu_ahead_smooth[n, :self.last_train_obs[n]-1])
+                denominator += self.last_train_obs[n] - 1
+        self.sigma_1 = numerator / denominator
 
     # M step update for the initial state mean
     def init_z_mle(self):
@@ -264,10 +274,13 @@ class EM:
                     x_t = np.zeros_like(inr)
                     for i, t in enumerate(inr_index):
                         extra[i] = self.added_effect(n, t)
+                        # for each time point w/ a measurement
+                        # x_t[i] stores whether this treatment is given at the j+1 past time point
                         if t >= j+1:
                             x_t[i] = self.X[n, t-(j+1), treatment]
                         elif self.X_prev_given:
                             x_t[i] = self.X_prev[n, -(j+1), treatment]
+                        # extra[i] stores the effect of this treatment at the j+1 past time point
                         extra[i] -= self.A[j, treatment] * x_t[i]
                     result += np.sum(np.multiply(inr-self.mu_smooth[n, inr_index]-extra, x_t))
                     divisor += np.sum(np.square(x_t))
@@ -299,16 +312,22 @@ class EM:
 
     # M step updates for the observation variance
     def sigma_2_mle(self):
-        result = 0
+        #result = 0
+        numerator = 0
+        denominator = 0
         for n in range(self.num_patients):
             inr_index, inr = self.find_valid_inr(n)
             pi = np.zeros_like(inr)
             for i, t in enumerate(inr_index):
                 pi[i] = self.added_effect(n, t)
+            '''  
             sum_result = np.sum(np.square(inr-pi)-2*np.multiply(inr-pi, self.mu_smooth[n, inr_index])+self.mu_square_smooth[n, inr_index]) 
             result += sum_result / inr_index.shape[0]
-        result /= self.num_patients
-        self.sigma_2 = result
+            '''
+        #result /= self.num_patients
+            numerator += np.sum(np.square(inr-pi)-2*np.multiply(inr-pi, self.mu_smooth[n, inr_index])+self.mu_square_smooth[n, inr_index]) 
+            denominator += inr_index.shape[0]
+        self.sigma_2 = numerator / denominator
         
     def M_step(self):
         self.init_z_mle()
@@ -340,7 +359,8 @@ class EM:
             print('calculating loglik took {}'.format(t3-t2))
             '''
             self.obs_log_lik.append(new_ll)
-    
+            #self.expected_log_lik.append(self.expected_complete_log_lik())
+
             if np.abs(new_ll - old_ll) < tol:
                 print('{} iterations before loglik converges'.format(i+1))
                 return i+1
@@ -348,11 +368,9 @@ class EM:
 
             # for faster training convergence, stop iterations when parameters stop changing
             new_params = np.concatenate([self.A.flatten(), self.b, np.array([self.init_z, self.sigma_0, self.sigma_1, self.sigma_2])])
-            '''
             if np.max(np.absolute(new_params-old_params))<tol:
                 print('{} iterations before params converge'.format(i+1))
                 return i+1
-            '''
             old_params = new_params
             
             # keep a list of values of each param for each iteration to debug mse 
@@ -438,8 +456,7 @@ class EM:
         log_sigma_0 = -self.num_patients * np.log(self.sigma_0)/2
         log_lik += log_sigma_0
         for n in range(self.num_patients):
-            inr_index = np.where(np.invert(np.isnan(self.y[n, :self.last_train_obs[n]])))[0]
-            inr = self.y[n, inr_index]
+            inr_index, inr = self.find_valid_inr(n)
             log_sigma_1 = -(self.last_train_obs[n]-1)/2*np.log(self.sigma_1)
             log_sigma_2 = -inr_index.shape[0]/2*np.log(self.sigma_2)
             first_term = -1/(2*self.sigma_0)*(self.mu_square_smooth[n, 0]-2*self.init_z*self.mu_smooth[n, 0]+np.square(self.init_z))
@@ -450,4 +467,4 @@ class EM:
                 pi[i] = self.added_effect(n, t)
             third_term = -1/(2*self.sigma_2)*np.sum(np.square(inr-pi)-2*np.multiply(inr-pi, self.mu_smooth[n, inr_index])+self.mu_square_smooth[n, inr_index]) 
             log_lik += log_sigma_1 + log_sigma_2 + first_term + second_term + third_term
-        return log_lik
+        return float(log_lik)
