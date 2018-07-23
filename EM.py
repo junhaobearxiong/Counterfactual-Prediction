@@ -76,7 +76,7 @@ class EM:
             self.b = np.zeros(self.M) + np.random.randn(self.M)*0.01
 
         self.d = np.zeros(self.K)
-        self.sigma_0 = np.abs(np.random.randn()*.1) # initial state variance
+        self.sigma_0 = np.abs(np.random.randn()) # initial state variance
         self.sigma_1 = np.abs(np.random.randn())
         self.sigma_2 = np.abs(np.random.randn()*.01)
         self.init_z = np.random.normal(0, np.sqrt(self.sigma_0), size = 1)# np.random.uniform(0, 10, size = 1) # initial state mean
@@ -331,7 +331,7 @@ class EM:
         
     def M_step(self):
         self.init_z_mle()
-        self.sigma_0_mle()
+        #self.sigma_0_mle()
         self.sigma_1_mle()
         self.A_mle()
         self.b_mle()
@@ -368,9 +368,11 @@ class EM:
 
             # for faster training convergence, stop iterations when parameters stop changing
             new_params = np.concatenate([self.A.flatten(), self.b, np.array([self.init_z, self.sigma_0, self.sigma_1, self.sigma_2])])
+            '''
             if np.max(np.absolute(new_params-old_params))<tol:
                 print('{} iterations before params converge'.format(i+1))
                 return i+1
+            '''
             old_params = new_params
             
             # keep a list of values of each param for each iteration to debug mse 
