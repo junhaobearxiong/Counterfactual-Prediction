@@ -79,8 +79,11 @@ class EM:
         self.sigma_0 = np.abs(np.random.randn()) # initial state variance
         self.sigma_1 = np.abs(np.random.randn())
         self.sigma_2 = np.abs(np.random.randn()*.01)
-        self.init_z = np.random.normal(0, np.sqrt(self.sigma_0), size = 1)# np.random.uniform(0, 10, size = 1) # initial state mean
-        
+        # testing 
+        self.init_z = 0 #np.random.normal(0, np.sqrt(self.sigma_0), size = 1)# initial state mean
+        self.intercept = np.random.normal(0, 1, size=1)
+
+
         self.init_0 = self.sigma_0
         self.init_1 = self.sigma_1
         self.init_2 = self.sigma_2
@@ -329,19 +332,33 @@ class EM:
             numerator += np.sum(np.square(inr-pi-self.mu_smooth[n, inr_index])+self.sigma_smooth[n, inr_index])
             denominator += inr_index.shape[0]
         self.sigma_2 = numerator / denominator
-        
+    
+    # testing
+    def intercept_mle(self):
+        numerator = 0
+        denominator = 0
+        for n in range(self.num_patients):
+            inr_index, inr = self.find_valid_inr(n)
+            pi = np.zeros_like(inr)
+            for i, t in enumerate(inr_index):
+                pi[i] = self.added_effect(n, t)      
+            numerator += np.sum(inr-pi-self.mu_smooth[n, inr_index])
+            denominator += inr_index.shape[0]
+        self.intercept = numerator / denominator
+
     def M_step(self):
-        self.init_z_mle()
+        #self.init_z_mle()
         self.sigma_0_mle()
         self.sigma_1_mle()
-        #self.A_mle()
-        #self.b_mle()
+        self.A_mle()
+        self.b_mle()
         self.sigma_2_mle()
+        self.intercept_mle()
         
     '''Run EM for fixed iterations or until paramters converge'''
     def run_EM(self, max_num_iter, tol=.001):
         old_ll = -np.inf
-        old_params = np.full(self.J*self.N+self.M+4, np.inf)
+        old_params = np.full(self.J*self.N+self.M+5, np.inf)
         for i in range(max_num_iter):
             print('iteration {}'.format(i+1))
             #t0 = time.time()
@@ -368,12 +385,10 @@ class EM:
             old_ll = new_ll
 
             # for faster training convergence, stop iterations when parameters stop changing
-            new_params = np.concatenate([self.A.flatten(), self.b, np.array([self.init_z, self.sigma_0, self.sigma_1, self.sigma_2])])
-            '''
+            new_params = np.concatenate([self.A.flatten(), self.b, np.array([self.init_z, self.sigma_0, self.sigma_1, self.sigma_2, self.intercept])])
             if np.max(np.absolute(new_params-old_params))<tol:
                 print('{} iterations before params converge'.format(i+1))
                 return i+1
-            '''
             old_params = new_params
             
             # keep a list of values of each param for each iteration to debug mse 
