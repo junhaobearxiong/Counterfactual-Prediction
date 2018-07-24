@@ -325,16 +325,17 @@ class EM:
             result += sum_result / inr_index.shape[0]
             '''
         #result /= self.num_patients
-            numerator += np.sum(np.square(inr-pi)-2*np.multiply(inr-pi, self.mu_smooth[n, inr_index])+self.mu_square_smooth[n, inr_index]) 
+            #numerator += np.sum(np.square(inr-pi)-2*np.multiply(inr-pi, self.mu_smooth[n, inr_index])+self.mu_square_smooth[n, inr_index]) 
+            numerator += np.sum(np.square(inr-pi-self.mu_smooth[n, inr_index])+self.sigma_smooth[n, inr_index])
             denominator += inr_index.shape[0]
         self.sigma_2 = numerator / denominator
         
     def M_step(self):
         self.init_z_mle()
-        #self.sigma_0_mle()
+        self.sigma_0_mle()
         self.sigma_1_mle()
-        self.A_mle()
-        self.b_mle()
+        #self.A_mle()
+        #self.b_mle()
         self.sigma_2_mle()
         
     '''Run EM for fixed iterations or until paramters converge'''
