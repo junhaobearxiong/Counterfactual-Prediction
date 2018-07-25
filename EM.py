@@ -80,7 +80,7 @@ class EM:
         self.sigma_1 = np.abs(np.random.randn())
         self.sigma_2 = np.abs(np.random.randn()*.01)
         # testing 
-        self.init_z = 0 #np.random.normal(0, np.sqrt(self.sigma_0), size = 1)# initial state mean
+        self.init_z = np.random.normal(0, np.sqrt(self.sigma_0), size = 1)# initial state mean
         self.intercept = np.random.normal(0, 1, size=1)
 
 
@@ -347,13 +347,13 @@ class EM:
         self.intercept = numerator / denominator
 
     def M_step(self):
-        #self.init_z_mle()
+        self.init_z_mle()
         self.sigma_0_mle()
         self.sigma_1_mle()
         self.A_mle()
         self.b_mle()
         self.sigma_2_mle()
-        self.intercept_mle()
+        #self.intercept_mle()
         
     '''Run EM for fixed iterations or until paramters converge'''
     def run_EM(self, max_num_iter, tol=.001):
