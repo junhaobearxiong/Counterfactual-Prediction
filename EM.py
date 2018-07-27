@@ -38,7 +38,8 @@ class EM:
     init_b: the initial mean of coefficients in b
     '''
     def __init__(self, y, X, c, J, K, train_pct, X_prev_given=False, X_prev=None, single_effect=False, 
-        init_given=False, init_A=None, init_b=None):
+        init_A_given=False, init_A=None, init_b_given=False, init_b=None, init_0=False, init_1=False, 
+        init_2=False, init_state=False):
         # Store inputs
         self.num_patients = np.shape(y)[0] 
         self.T = np.shape(y)[1] # length of the observed sequence
@@ -58,6 +59,8 @@ class EM:
         self.last_obs = self.find_last_obs()
         # time of last observation for training plus one 
         self.last_train_obs = self.find_last_train_obs()
+        # list of tuple: (array of index of non-nan inr value, array of non-nan inr value)
+        self.valid_inr = self.find_valid_inr()
         
         # Other model parameters
         self.N = np.shape(self.X)[2] # number of treatments
@@ -65,29 +68,45 @@ class EM:
         self.Q = np.zeros((self.num_patients, self.T, self.K)) # interaction term
         
         # Model Parameters to be estimated
-        if init_given:
-            self.A = init_A + np.random.randn(init_A.shape[0], init_A.shape[1])
-            self.b = init_b + np.random.randn(init_b.shape[0])
+        if init_A_given:
+            self.A = np.random.randn(init_A.shape[0], init_A.shape[1])
         else:
             if self.single_effect:
                 self.A = np.zeros(self.N) + np.random.randn(self.N)*0.01
             else:
                 self.A = np.zeros((self.J, self.N)) + np.random.randn(self.J, self.N)*0.01 # coefficients a_j's
+        if init_b_given:
+            self.b = init_b #+ np.random.randn(init_b.shape[0])
+        else:
             self.b = np.zeros(self.M) + np.random.randn(self.M)*0.01
 
         self.d = np.zeros(self.K)
-        self.sigma_0 = np.abs(np.random.randn()) # initial state variance
-        self.sigma_1 = np.abs(np.random.randn())
-        self.sigma_2 = np.abs(np.random.randn()*.01)
-        # testing 
-        self.init_z = np.random.normal(0, np.sqrt(self.sigma_0), size = 1)# initial state mean
+        # testing
+        if init_0:
+            self.sigma_0 = init_0
+        else:
+            self.sigma_0 = np.abs(np.random.randn()*.01) # initial state variance
+        if init_1:
+            self.sigma_1 = init_1
+        else:
+            self.sigma_1 = np.abs(np.random.randn()*.01) # transition variance
+        if init_2:
+            self.sigma_2 = init_2
+        else:
+            self.sigma_2 = np.abs(np.random.randn()*.01) # observation variance
+        if init_state:
+            self.init_z = init_state
+        else: 
+            self.init_z = np.random.normal(0, np.sqrt(self.sigma_0), size = 1)# initial state mean
+        
         self.intercept = np.random.normal(0, 1, size=1)
 
-
+        # used to debug
         self.init_0 = self.sigma_0
         self.init_1 = self.sigma_1
         self.init_2 = self.sigma_2
-        self.init_state = self.init_z        
+        self.init_state = self.init_z
+        self.init_b = np.copy(self.b)
 
         # Intermediate values to stored for Kalman filter and smoother computations
         self.mu_filter = np.zeros((self.num_patients, self.T)) # mu_t|t
@@ -126,6 +145,16 @@ class EM:
             non_nan_idx = np.where(np.invert(np.isnan(self.y[i, :])))[0]
             last_train_obs[i] = non_nan_idx[int(non_nan_idx.shape[0] * self.train_pct) - 1] + 1
         return last_train_obs
+
+    # helper function to find the index of valid (not nan) inr measurement for 
+    # patient n, return the indices and the corresponding inr values
+    def find_valid_inr(self):
+        valid_inr = []
+        for n in range(self.num_patients):
+            inr_index = np.where(np.invert(np.isnan(self.y[n, :self.last_train_obs[n]])))[0]
+            inr = self.y[n, inr_index]
+            valid_inr.append((inr_index, inr))
+        return valid_inr
     
     # compute the added effect, denoted pi_t, at time t given the current parameter values 
     def added_effect(self, n, t):
@@ -256,13 +285,7 @@ class EM:
             result += self.mu_smooth[n, 0]
         result /= self.num_patients
         self.init_z = result
-    
-    # helper function to find the index of valid (not nan) inr measurement for 
-    # patient n, return the indices and the corresponding inr values
-    def find_valid_inr(self, n):
-        inr_index = np.where(np.invert(np.isnan(self.y[n, :self.last_train_obs[n]])))[0]
-        inr = self.y[n, inr_index]
-        return (inr_index, inr)
+
 
     # mle updates for the coefficients in A
     # derived by setting gradient wrt the coefficients to zero
@@ -272,7 +295,7 @@ class EM:
                 result = 0 # storing the result of the summation
                 divisor = 0 # storing the value of the sum in the denominator
                 for n in range(self.num_patients):
-                    inr_index, inr = self.find_valid_inr(n)
+                    inr_index, inr = self.valid_inr[n]
                     extra = np.zeros_like(inr)
                     x_t = np.zeros_like(inr)
                     for i, t in enumerate(inr_index):
@@ -301,7 +324,7 @@ class EM:
             result = 0
             divisor = 0 # number of times the term involving b_i is included in the sum
             for n in range(self.num_patients):
-                inr_index, inr = self.find_valid_inr(n)
+                inr_index, inr = self.valid_inr[n]
                 extra = np.zeros_like(inr)
                 for i, t in enumerate(inr_index):
                     extra[i] = self.added_effect(n, t)
@@ -319,7 +342,7 @@ class EM:
         numerator = 0
         denominator = 0
         for n in range(self.num_patients):
-            inr_index, inr = self.find_valid_inr(n)
+            inr_index, inr = self.valid_inr[n]
             pi = np.zeros_like(inr)
             for i, t in enumerate(inr_index):
                 pi[i] = self.added_effect(n, t)
@@ -338,7 +361,7 @@ class EM:
         numerator = 0
         denominator = 0
         for n in range(self.num_patients):
-            inr_index, inr = self.find_valid_inr(n)
+            inr_index, inr = self.valid_inr[n]
             pi = np.zeros_like(inr)
             for i, t in enumerate(inr_index):
                 pi[i] = self.added_effect(n, t)      
@@ -432,7 +455,7 @@ class EM:
 
     # get prediction mean square error 
     def get_MSE(self):
-        self.sos = []
+        #self.sos = []
         sum_of_square = 0
         count = 0
         for n in range(self.num_patients):
@@ -444,7 +467,7 @@ class EM:
                 y_pred_valid = y_pred[valid_index]
                 sum_of_square += np.sum(np.square(np.subtract(y_pred_valid, y_true_valid))) / y_pred_valid.shape[0]
                 count += 1
-                self.sos.append(np.sum(np.square(np.subtract(y_pred_valid, y_true_valid))) / y_pred_valid.shape[0])
+                #self.sos.append(np.sum(np.square(np.subtract(y_pred_valid, y_true_valid))) / y_pred_valid.shape[0])
         if count > 0:
             return sum_of_square / count
         else:
@@ -458,7 +481,7 @@ class EM:
         # since kalman filter is run afresh every em iteration, this doesn't affect em outputs
         self.forward()
         for n in range(self.num_patients):
-            inr_index, inr = self.find_valid_inr(n)
+            inr_index, inr = self.valid_inr[n]
             log_lik = np.zeros_like(inr)
             for i, index in enumerate(inr_index):
                 log_lik[i] = scipy.stats.norm.logpdf(self.y[n, index], self.mu_pred[n, index]+self.added_effect(n, index),
@@ -474,7 +497,7 @@ class EM:
         log_sigma_0 = -self.num_patients * np.log(self.sigma_0)/2
         log_lik += log_sigma_0
         for n in range(self.num_patients):
-            inr_index, inr = self.find_valid_inr(n)
+            inr_index, inr = self.valid_inr[n]
             log_sigma_1 = -(self.last_train_obs[n]-1)/2*np.log(self.sigma_1)
             log_sigma_2 = -inr_index.shape[0]/2*np.log(self.sigma_2)
             first_term = -1/(2*self.sigma_0)*(self.mu_square_smooth[n, 0]-2*self.init_z*self.mu_smooth[n, 0]+np.square(self.init_z))
