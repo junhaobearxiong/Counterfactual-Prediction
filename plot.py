@@ -42,7 +42,7 @@ def plot(em, n, time_unit, signal_name, treatment_types, true_model=False, model
         if em.X_prev_given:
             for t in np.nonzero(em.X_prev[n, :, treatment])[0]:
                 plt.axvline(x=-(empty.shape[0]-t) * time_unit, linestyle=':', color=colors[treatment], label=treatment_types[treatment])
-    plt.plot(times[0:em.last_train_obs[n]], em.mu_filter[n, 0:em.last_train_obs[n]], label='filtered values', color='m')
+    #plt.plot(times[0:em.last_train_obs[n]], em.mu_filter[n, 0:em.last_train_obs[n]], label='filtered values', color='m')
     plt.xlabel('time (hrs)')
     plt.ylabel(signal_name)
     plt.title('Model Prediction')

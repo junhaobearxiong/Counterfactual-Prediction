@@ -34,8 +34,8 @@ class EM:
         smaller index in number of past effects corresponds to earlier time point
         so the last index has treatment that is closest to time zero
     single_effect: whether to consider only the effect of one treatment in the past
-    init_A: the initial mean of coefficients in A
-    init_b: the initial mean of coefficients in b
+    init_A: the initial mean of coefficients in A (need to be dtype=float)
+    init_b: the initial mean of coefficients in b (need to be dtype=float)
     '''
     def __init__(self, y, X, c, J, K, train_pct, X_prev_given=False, X_prev=None, single_effect=False, 
         init_A_given=False, init_A=None, init_b_given=False, init_b=None, init_0=False, init_1=False, 
@@ -69,23 +69,23 @@ class EM:
         
         # Model Parameters to be estimated
         if init_A_given:
-            self.A = np.random.randn(init_A.shape[0], init_A.shape[1])
+            self.A = init_A #np.random.randn(init_A.shape[0], init_A.shape[1])
         else:
             if self.single_effect:
-                self.A = np.zeros(self.N) + np.random.randn(self.N)*0.01
+                self.A = np.zeros(self.N) + np.random.randn(self.N)*0.001
             else:
-                self.A = np.zeros((self.J, self.N)) + np.random.randn(self.J, self.N)*0.01 # coefficients a_j's
+                self.A = np.zeros((self.J, self.N)) + np.random.randn(self.J, self.N)*0.001 # coefficients a_j's
         if init_b_given:
             self.b = init_b #+ np.random.randn(init_b.shape[0])
         else:
-            self.b = np.zeros(self.M) + np.random.randn(self.M)*0.01
+            self.b = np.zeros(self.M) + np.random.randn(self.M)*0.001
 
         self.d = np.zeros(self.K)
         # testing
         if init_0:
             self.sigma_0 = init_0
         else:
-            self.sigma_0 = np.abs(np.random.randn()*.01) # initial state variance
+            self.sigma_0 = np.abs(np.random.randn()*.001) # initial state variance
         if init_1:
             self.sigma_1 = init_1
         else:
