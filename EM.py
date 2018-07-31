@@ -27,15 +27,22 @@ class EM:
         shape: [number of patients * number of time points * number of types of treatments]
     c: static conditions (chronics and demographics), shape: [number of patients * number of types of static conditions]
     J: number of past treatments to consider
-    K: number of interaction effects to model (NOT implemented yet)
+    K: number of interaction effects to model (interaction NOT implemented yet)
     train_pct: percentage of EACH observation time series to use for training
+    X_prev_given: boolean indicating whether X_prev is given
     X_prev: treatments prior to the first observation
         shape: [number of patients * number of past effects * number of types of treatments]
         smaller index in number of past effects corresponds to earlier time point
         so the last index has treatment that is closest to time zero
     single_effect: whether to consider only the effect of one treatment in the past
-    init_A: the initial mean of coefficients in A (need to be dtype=float)
-    init_b: the initial mean of coefficients in b (need to be dtype=float)
+    init_A_given: boolean indicating whether init_A is given
+    init_A: the initial coefficients in A (need to be dtype=float)
+    init_b_given: boolean indicating whether init_b is given
+    init_b: the initial coefficients in b (need to be dtype=float)
+    init_0: the initialization of initial state variance
+    init_1: the initialization of transition variance
+    init_2: the initialization of observation variance
+    init_state: the initialization of initial state mean
     '''
     def __init__(self, y, X, c, J, K, train_pct, X_prev_given=False, X_prev=None, single_effect=False, 
         init_A_given=False, init_A=None, init_b_given=False, init_b=None, init_0=False, init_1=False, 
@@ -81,7 +88,7 @@ class EM:
             self.b = np.zeros(self.M) + np.random.randn(self.M)*0.001
 
         self.d = np.zeros(self.K)
-        # testing
+
         if init_0:
             self.sigma_0 = init_0
         else:
@@ -99,9 +106,7 @@ class EM:
         else: 
             self.init_z = np.random.normal(0, np.sqrt(self.sigma_0), size = 1)# initial state mean
         
-        self.intercept = np.random.normal(0, 1, size=1)
-
-        # used to debug
+        # record the initialization values of parameters for debugging
         self.init_0 = self.sigma_0
         self.init_1 = self.sigma_1
         self.init_2 = self.sigma_2
@@ -121,7 +126,7 @@ class EM:
         self.mu_pred = np.zeros((self.num_patients, self.T)) # mu_t-1|t
         self.sigma_pred = np.zeros((self.num_patients, self.T)) # sigma^2_t-1|t
         
-        # used to debug
+        # analytics to keep track of in each EM iteration
         self.expected_log_lik = []
         self.obs_log_lik = []
         self.mse = []
@@ -254,24 +259,12 @@ class EM:
 
     # M step updates for the transition variance
     def sigma_1_mle(self):
-        '''
-        result = 0
-        num_sum = 0
-        '''
         numerator = 0
         denominator = 0
         for n in range(self.num_patients):
             # if a patient only has one observation, the transition term doesn't appear in its likelihood
             # so when calculating sigma 1, we should only include those who have more than one observations
             if self.last_train_obs[n] > 1:
-                '''
-                sum_result = np.sum(np.delete(self.mu_square_smooth[n, :self.last_train_obs[n]]
-                    +np.roll(self.mu_square_smooth[n, :self.last_train_obs[n]], shift=-1), -1) \
-                    - 2*self.mu_ahead_smooth[n, :self.last_train_obs[n]-1])
-                result += sum_result / (self.last_train_obs[n]-1)
-                num_sum += 1
-                '''
-        #result /= num_sum
                 numerator += np.sum(np.delete(self.mu_square_smooth[n, :self.last_train_obs[n]]
                     +np.roll(self.mu_square_smooth[n, :self.last_train_obs[n]], shift=-1), -1) \
                     - 2*self.mu_ahead_smooth[n, :self.last_train_obs[n]-1])
@@ -338,7 +331,6 @@ class EM:
 
     # M step updates for the observation variance
     def sigma_2_mle(self):
-        #result = 0
         numerator = 0
         denominator = 0
         for n in range(self.num_patients):
@@ -346,28 +338,9 @@ class EM:
             pi = np.zeros_like(inr)
             for i, t in enumerate(inr_index):
                 pi[i] = self.added_effect(n, t)
-            '''  
-            sum_result = np.sum(np.square(inr-pi)-2*np.multiply(inr-pi, self.mu_smooth[n, inr_index])+self.mu_square_smooth[n, inr_index]) 
-            result += sum_result / inr_index.shape[0]
-            '''
-        #result /= self.num_patients
-            #numerator += np.sum(np.square(inr-pi)-2*np.multiply(inr-pi, self.mu_smooth[n, inr_index])+self.mu_square_smooth[n, inr_index]) 
             numerator += np.sum(np.square(inr-pi-self.mu_smooth[n, inr_index])+self.sigma_smooth[n, inr_index])
             denominator += inr_index.shape[0]
         self.sigma_2 = numerator / denominator
-    
-    # testing
-    def intercept_mle(self):
-        numerator = 0
-        denominator = 0
-        for n in range(self.num_patients):
-            inr_index, inr = self.valid_inr[n]
-            pi = np.zeros_like(inr)
-            for i, t in enumerate(inr_index):
-                pi[i] = self.added_effect(n, t)      
-            numerator += np.sum(inr-pi-self.mu_smooth[n, inr_index])
-            denominator += inr_index.shape[0]
-        self.intercept = numerator / denominator
 
     def M_step(self):
         self.init_z_mle()
@@ -376,12 +349,12 @@ class EM:
         self.A_mle()
         self.b_mle()
         self.sigma_2_mle()
-        #self.intercept_mle()
         
-    '''Run EM for fixed iterations or until paramters converge'''
+    # run EM until observed data log likelihood or paramters converge
+    # return the number of iterations it took
     def run_EM(self, max_num_iter, tol=.001):
         old_ll = -np.inf
-        old_params = np.full(self.J*self.N+self.M+5, np.inf)
+        old_params = np.full(self.J*self.N+self.M+4, np.inf)
         for i in range(max_num_iter):
             print('iteration {}'.format(i+1))
             #t0 = time.time()
@@ -390,15 +363,9 @@ class EM:
             #t1 = time.time()
             self.M_step()
             #print('M step {}'.format(self.expected_complete_log_lik()))
-            #self.expected_log_lik.append(self.expected_complete_log_lik())
             #t2 = time.time()
             new_ll = self.pykalman_log_lik()
             #t3 = time.time()
-            '''
-            print('E step took {}'.format(t1-t0))
-            print('M step took {}'.format(t2-t1))
-            print('calculating loglik took {}'.format(t3-t2))
-            '''
             self.obs_log_lik.append(new_ll)
             #self.expected_log_lik.append(self.expected_complete_log_lik())
 
@@ -408,13 +375,13 @@ class EM:
             old_ll = new_ll
 
             # for faster training convergence, stop iterations when parameters stop changing
-            new_params = np.concatenate([self.A.flatten(), self.b, np.array([self.init_z, self.sigma_0, self.sigma_1, self.sigma_2, self.intercept])])
+            new_params = np.concatenate([self.A.flatten(), self.b, np.array([self.init_z, self.sigma_0, self.sigma_1, self.sigma_2])])
             if np.max(np.absolute(new_params-old_params))<tol:
                 print('{} iterations before params converge'.format(i+1))
                 return i+1
             old_params = new_params
             
-            # keep a list of values of each param for each iteration to debug mse 
+            # keep a list of values of each param for each iteration for debugging 
             if i == 0:
                 for j in range(len(new_params)):
                     self.params[j] = []
@@ -430,13 +397,13 @@ class EM:
     def transition(self, prev, n, t):
         noise = self.sigma_filter[n, t-1] + self.sigma_1
         self.sigma_filter[n, t] = noise
-        z = prev #np.random.normal(prev, np.sqrt(noise), 1)
+        z = prev
         return z
 
     # emission function used in prediction
     def emission(self, z, n, t):
         mean = z + self.added_effect(n, t)
-        y = mean #np.random.normal(mean, np.sqrt(self.sigma_2), 1)
+        y = mean
         return y
     
     # given parameters and a sequence latent states up to the last training observation
@@ -455,7 +422,6 @@ class EM:
 
     # get prediction mean square error 
     def get_MSE(self):
-        #self.sos = []
         sum_of_square = 0
         count = 0
         for n in range(self.num_patients):
@@ -467,7 +433,6 @@ class EM:
                 y_pred_valid = y_pred[valid_index]
                 sum_of_square += np.sum(np.square(np.subtract(y_pred_valid, y_true_valid))) / y_pred_valid.shape[0]
                 count += 1
-                #self.sos.append(np.sum(np.square(np.subtract(y_pred_valid, y_true_valid))) / y_pred_valid.shape[0])
         if count > 0:
             return sum_of_square / count
         else:
@@ -486,7 +451,6 @@ class EM:
             for i, index in enumerate(inr_index):
                 log_lik[i] = scipy.stats.norm.logpdf(self.y[n, index], self.mu_pred[n, index]+self.added_effect(n, index),
                     np.sqrt(self.sigma_pred[n, index]+self.sigma_2))
-                #log_lik[i] = scipy.stats.norm.logpdf(self.y[n, index], self.mu_smooth[n, index], np.sqrt(self.sigma_smooth[n, index]+self.sigma_2))
             total_log_lik += np.sum(log_lik)
         return total_log_lik
 
