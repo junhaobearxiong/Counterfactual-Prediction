@@ -18,3 +18,4 @@ Create counterfactual trajectory of a signal given past trajectory and some cont
      * Population Level Analysis: assume the same set of parameters for all patients; fit to real data
     * Individual Level Analysis: assume a set of parameters for each patients; fit to real data
     * Source Data Analysis: some analysis on the real data set before and after preprocessing
+    * Playground: place to do small analysis and testing
