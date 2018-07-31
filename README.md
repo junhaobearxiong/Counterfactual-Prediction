@@ -1,6 +1,6 @@
 # Counterfactual-Prediction
 
-Create counterfactual trajectory of a signal given past trajectory and some contexts.
+Create counterfactual trajectory of a signal given past trajectory and some contexts (Please see the pdf file for a more detailed description of the model and the data pipeline)
 
 ### Files Description
 * PDF file
