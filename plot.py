@@ -26,6 +26,9 @@ def plot(em, n, time_unit, signal_name, treatment_types, true_model=False, model
         plt.fill_between(times, np.concatenate([empty, y+upper]), np.concatenate([empty, y+lower]), color='.8')
         plt.plot(times, np.concatenate([empty, z]), label = 'predicted state values')
         plt.plot(times, np.concatenate([empty, y]), label = 'predicted observed values', color='g', linestyle='--')
+    else:
+        plt.plot(times, np.concatenate([empty, em.mu_smooth[n, 0:em.last_train_obs[n]]]),
+         label='predicted state values', color='g')
     if true_model:
         plt.plot(times, np.concatenate([empty, model.z[n, 0:em.last_obs[n]]]), label = 'actual state values')
     plt.plot(times[empty.shape[0]:empty.shape[0]+em.last_train_obs[n]], 
