@@ -4,7 +4,7 @@ Create counterfactual trajectory of a signal given past trajectory and some cont
 
 ### Files Description
 * PDF file
-    * Detailed write up of the model
+    * Detailed write up of the model and results
 * Python files
     * EM.py: perform inference and parameter estimation
     * plot.py: plot predicted states and observations
