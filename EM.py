@@ -76,14 +76,14 @@ class EM:
         
         # Model Parameters to be estimated
         if init_A_given:
-            self.A = init_A #np.random.randn(init_A.shape[0], init_A.shape[1])
+            self.A = init_A 
         else:
             if self.single_effect:
                 self.A = np.zeros(self.N) + np.random.randn(self.N)*0.001
             else:
                 self.A = np.zeros((self.J, self.N)) + np.random.randn(self.J, self.N)*0.001 # coefficients a_j's
         if init_b_given:
-            self.b = init_b #+ np.random.randn(init_b.shape[0])
+            self.b = init_b
         else:
             self.b = np.zeros(self.M) + np.random.randn(self.M)*0.001
 
@@ -132,7 +132,7 @@ class EM:
         self.mse = []
         self.params = {}
     
-    # find the last non-nan y value for training for each patient
+    # for each patient, store the index after the last non-nan y value
     # this is necessary since the time series of each patient has different length
     # they are stored in one 2d array, so there would be nans after the last observation for each patient
     # return an array with the length num_patients
@@ -142,8 +142,8 @@ class EM:
             last_non_nan[i] = np.where(np.invert(np.isnan(self.y[i, :])))[0][-1] + 1
         return last_non_nan
     
-    # find the position of the last observation used for training
-    # return the index right after that position
+    # find the index of the last observation used for training
+    # return the index right after that index
     def find_last_train_obs(self):
         last_train_obs = np.zeros(self.y.shape[0], dtype=int)
         for i in range(self.y.shape[0]):
@@ -189,7 +189,6 @@ class EM:
             self.mu_filter[n, t] = self.mu_pred[n, t]
             self.sigma_filter[n, t] = self.sigma_pred[n, t]
         else:
-            #sigma_pred = self.sigma_filter[n, t] + self.sigma_1
             self.kgain[n, t] = self.sigma_pred[n, t] / (self.sigma_pred[n, t] + self.sigma_2)
             self.mu_filter[n, t] = self.mu_pred[n, t] + self.kgain[n, t] * (self.y[n, t] - self.mu_pred[n, t] - self.added_effect(n, t))
             self.sigma_filter[n, t] = (1 - self.kgain[n, t]) * self.sigma_pred[n, t]
@@ -198,8 +197,8 @@ class EM:
     def forward(self):
         for n in range(self.num_patients):
             # initialization and the first iteration
-            self.mu_pred[n, 0] = self.init_z #self.mu_filter[n, 0] = self.init_z
-            self.sigma_pred[n, 0] = self.sigma_0 #self.sigma_filter[n, 0] = self.sigma_0
+            self.mu_pred[n, 0] = self.init_z
+            self.sigma_pred[n, 0] = self.sigma_0 
             self.kgain[n, 0] = self.sigma_pred[n, 0] / (self.sigma_pred[n, 0] + self.sigma_2)
             self.mu_filter[n, 0] = self.mu_pred[n, 0] + self.kgain[n, 0] * (self.y[n, 0] - self.mu_pred[n, 0] - self.added_effect(n, 0))
             self.sigma_filter[n, 0] = (1 - self.kgain[n, 0]) * self.sigma_pred[n, 0]
@@ -208,7 +207,6 @@ class EM:
 
     # kalman smoother update step
     def ksmoother(self, n, t):
-        #sigma_pred = self.sigma_filter[n, t] + self.sigma_1 # sigma^2_t+1|t
         self.jgain[n, t] = self.sigma_filter[n, t] / self.sigma_pred[n, t+1]
         self.mu_smooth[n, t] = self.mu_filter[n, t] + self.jgain[n, t] * (self.mu_smooth[n, t+1] - self.mu_pred[n, t+1])
         self.sigma_smooth[n, t] = self.sigma_filter[n, t] + np.square(self.jgain[n, t]) * (self.sigma_smooth[n, t+1] - self.sigma_pred[n, t+1])
@@ -367,7 +365,6 @@ class EM:
             new_ll = self.pykalman_log_lik()
             #t3 = time.time()
             self.obs_log_lik.append(new_ll)
-            #self.expected_log_lik.append(self.expected_complete_log_lik())
 
             if np.abs(new_ll - old_ll) < tol:
                 print('{} iterations before loglik converges'.format(i+1))

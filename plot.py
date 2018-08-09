@@ -5,7 +5,8 @@ from collections import OrderedDict
 
 # em is an em object
 # n is the index of patient
-# bin_size is the size of interval used to bin the data
+# time_unit is the size of interval used to bin the data
+# treatment_types is the list of treatments for this em object 
 # true_model indicates if we have the true data generating model
 # model is the the model generaing the data if we have it, default to None
 def plot(em, n, time_unit, signal_name, treatment_types, true_model=False, model=None):
@@ -15,7 +16,9 @@ def plot(em, n, time_unit, signal_name, treatment_types, true_model=False, model
     empty = np.zeros(0)
     if em.X_prev_given:
         times = [-j * time_unit for j in range(em.J, 0, -1)] + times
-        empty = np.full(em.J, np.nan) # trajectory in negative time is nothing
+        # trajectory in negative time is nothing, but we need this as placeholder so everything
+        # we plot is of the same length
+        empty = np.full(em.J, np.nan) 
     fig = plt.figure()
     if em.train_pct < 1 and em.last_train_obs[n] < em.last_obs[n]:
         z, y = em.predict(n)
